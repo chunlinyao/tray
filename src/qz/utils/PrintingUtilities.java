@@ -40,7 +40,7 @@ public class PrintingUtilities {
     }
 
     public enum Format {
-        BASE64, FILE, IMAGE, PLAIN, HEX, XML
+        BASE64, FILE, IMAGE, PLAIN, HEX, XML, PDF
     }
 
 

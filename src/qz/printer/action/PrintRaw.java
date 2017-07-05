@@ -11,6 +11,7 @@ package qz.printer.action;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.ssl.Base64;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -20,10 +21,7 @@ import qz.common.ByteArrayBuilder;
 import qz.common.Constants;
 import qz.exception.NullCommandException;
 import qz.exception.NullPrintServiceException;
-import qz.printer.ImageWrapper;
-import qz.printer.LanguageType;
-import qz.printer.PrintOptions;
-import qz.printer.PrintOutput;
+import qz.printer.*;
 import qz.utils.*;
 
 import javax.imageio.ImageIO;
@@ -105,6 +103,9 @@ public class PrintRaw implements PrintProcessor {
                     case XML:
                         commands.append(Base64.decodeBase64(FileUtilities.readXMLFile(cmd, opt.optString("xmlTag"))));
                         break;
+                    case PDF:
+                        commands.append(getPDFWrapper(cmd, opt).getImageCommand());
+                        break;
                     case PLAIN:
                     default:
                         commands.append(cmd.getBytes(encoding));
@@ -117,6 +118,52 @@ public class PrintRaw implements PrintProcessor {
         }
     }
 
+    private PDFWrapper getPDFWrapper(String cmd, JSONObject opt) throws IOException, JSONException {
+        PDDocument pdfdoc;
+        if (cmd.startsWith("data:application/pdf") && cmd.contains(";base64,")) {
+            String[] parts = cmd.split(";base64,");
+            cmd = parts[parts.length - 1];
+        }
+
+        if (Base64.isArrayByteBase64(cmd.getBytes())) {
+            pdfdoc = PDDocument.load(Base64.decodeBase64(cmd));
+        } else {
+            pdfdoc = PDDocument.load(new URL(cmd).openStream());
+        }
+
+        PDFWrapper pdfWrapper = new PDFWrapper(pdfdoc, LanguageType.getType(opt.optString("language")));
+        pdfWrapper.setCharset(Charset.forName(encoding));
+
+        int dpi = opt.optInt("dpi", -1);
+        if (dpi == -1) {
+            dpi = 300; //default
+        }
+        pdfWrapper.setDPI(dpi);
+
+        PDFWrapper.CropType cropType = PDFWrapper.CropType.valueOf(opt.optString("crop", "NONE").toUpperCase(Locale.ENGLISH));
+        pdfWrapper.setCropType(cropType);
+        //ESCP only
+        int density = opt.optInt("dotDensity", -1);
+        if (density == -1) {
+            String dStr = opt.optString("dotDensity", null);
+            if (dStr != null && !dStr.isEmpty()) {
+                switch(dStr.toLowerCase()) {
+                    case "single": density = 32; break;
+                    case "double": density = 33; break;
+                    case "triple": density = 39; break;
+                }
+            } else {
+                density = 32; //default
+            }
+        }
+        pdfWrapper.setDotDensity(density);
+
+        //EPL only
+        pdfWrapper.setxPos(opt.optInt("x", 0));
+        pdfWrapper.setyPos(opt.optInt("y", 0));
+
+        return pdfWrapper;
+    }
     private ImageWrapper getImageWrapper(String cmd, JSONObject opt) throws IOException, JSONException {
         BufferedImage buf;
 

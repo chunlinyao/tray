@@ -901,6 +901,7 @@ var qz = (function() {
                     if ((!data[i].format && data[i].type && data[i].type.toUpperCase() !== 'RAW') //unspecified format and not raw -> assume file
                         || (data[i].format && (data[i].format.toUpperCase() === 'FILE'
                         || (data[i].format.toUpperCase() === 'IMAGE' && !(data[i].data.indexOf("data:image/") === 0 && data[i].data.indexOf(";base64,") !== 0))
+                        || (data[i].format.toUpperCase() === 'PDF' && !(data[i].data.indexOf("data:application/") === 0 && data[i].data.indexOf(";base64,") !== 0))
                         || data[i].format.toUpperCase() === 'XML'))) {
                         data[i].data = _qz.tools.absolute(data[i].data);
                     }

@@ -36,7 +36,7 @@
         </path>
         <property name="pdfbox.path" value="${toString:find.jar}" />
 
-        <javac destdir="${build.project.dir}" source="${javac.source}" target="${javac.target}" includeantruntime="false" encoding="UTF-8">
+        <javac destdir="${build.project.dir}" source="${javac.source}" target="${javac.target}" includeantruntime="false" encoding="UTF-8" debug="true">
             <src path="${src.dir}"/>
             <classpath>
                 <!-- prefer bouncycastle from pdfbox over simplersa -->
