@@ -469,6 +469,8 @@ public class ImageWrapper {
         // these 24-dot stripes until we've execute past the height of the
         // bitmap.
         int offset = 0;
+        int sliceBytes = dotDensity < 72 ? 3 : 6;
+        int sliceHeight = dotDensity < 72 ? 24 : 48;
 
         while(offset < getHeight()) {
             // The third and fourth parameters to the bit image command are
@@ -486,7 +488,7 @@ public class ImageWrapper {
                 // Remember, 24 dots = 24 bits = 3 bytes.
                 // The 'k' variable keeps track of which of those
                 // three bytes that we're currently scribbling into.
-                for(int k = 0; k < 3; ++k) {
+                for(int k = 0; k < sliceBytes; ++k) {
                     byte slice = 0;
 
                     // A byte is 8 bits. The 'b' variable keeps track
@@ -527,7 +529,7 @@ public class ImageWrapper {
             // We're done with this 24-dot high pass. Render a newline
             // to bump the print head down to the next line
             // and keep on trucking.
-            offset += 24;
+            offset += sliceHeight;
             builder.append(new byte[] {10});
         }
 
