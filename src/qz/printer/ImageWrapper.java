@@ -9,11 +9,13 @@
  */
 package qz.printer;
 
+import org.bouncycastle.util.Arrays;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.ByteArrayBuilder;
 import qz.exception.InvalidRawImageException;
 import qz.utils.ByteUtilities;
+import qz.utils.Packbits;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -343,6 +345,9 @@ public class ImageWrapper {
 
                 getByteBuffer().append(cpcl, charset).append(new byte[] {13, 10});
                 break;
+            case BRASTER:
+                appendBrotherRasterSlices(getByteBuffer());
+                break;
             default:
                 throw new InvalidRawImageException(charset.name() + " image conversion is not yet supported.");
         }
@@ -434,6 +439,75 @@ public class ImageWrapper {
         bufferedImage = buffer;
     }
 
+    private void appendBrotherRasterSlices(ByteArrayBuilder builder) {
+
+        // Enable raster mode
+        // builder.append(new byte[] {0x1B, 0x69, 0x61, 0x01});
+
+        int height = getHeight();
+
+        byte n5 = (byte)(height & 0xff);
+        byte n6 = (byte)(height >> 8 & 0xff);
+        byte n7 = (byte)(height >> 16 & 0xff);
+        byte n8 = (byte)(height >> 24 & 0xff);
+
+        builder.append(new byte[] {0x1B, 0x69, 0x7A, (byte) 0x86, 0x0A, 0x50, 0x00, n5, n6, n7, n8, 0x00, 0x00});
+
+        builder.append(new byte[] {0x4D, 0x02});
+        int offset = 0;
+
+        boolean[] images = getImageAsBooleanArray();
+        int width = getWidth() / 8 + (getWidth() % 8 == 0 ? 0 : 1);
+        while(offset < getHeight()) {
+            int posStart = offset * getWidth();
+            boolean[] row = new boolean[getWidth()];
+            System.arraycopy(images, posStart, row,0, getWidth());
+            if(allFalse(row)) {
+                builder.append(new byte[] {0x5A});
+            } else {
+                byte[] byteArray = new byte[Math.max(162, width)];
+                // Convert every eight zero's to a full byte, in decimal
+                for(int i = 0; i < width; i++) {
+                    for(int k = 0; k < 8; k++) {
+                        if (8 * i + k < row.length) {
+                            byteArray[i + byteArray.length - width] += (row[8 * i + k]? 1:0) << 7 - k;
+                        }
+                    }
+                }
+                byte[] result = Packbits.packbits(reverseBits(byteArray));
+                builder.append(new byte[] {0x67, 0x00, (byte) result.length});
+                builder.append(result);
+            }
+            offset ++;
+
+        }
+
+    }
+
+    boolean allFalse(boolean[] val) {
+        for (boolean v : val) {
+            if (v) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    byte[] reverseBits (byte[] in) {
+        if(in == null) {
+            return null;
+        } else {
+            byte[] out = new byte[in.length];
+            int i = in.length -1;
+            int o = 0;
+            while (o < out.length) {
+                out[o] = (byte) (Integer.reverse(in[i]) >>> (Integer.SIZE - Byte.SIZE));;
+                i--;
+                o++;
+            }
+            return out;
+        }
+    }
     /**
      * http://android-essential-devtopics.blogspot.com/2013/02/sending-bit-image-to-epson-printer.html
      *
