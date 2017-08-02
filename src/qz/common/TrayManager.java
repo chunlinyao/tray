@@ -149,37 +149,37 @@ public class TrayManager {
     private void addMenuItems() {
         JPopupMenu popup = new JPopupMenu();
 
-        JMenu advancedMenu = new JMenu("Advanced");
+        JMenu advancedMenu = new JMenu("高级");
         advancedMenu.setMnemonic(KeyEvent.VK_A);
         advancedMenu.setIcon(iconCache.getIcon(IconCache.Icon.SETTINGS_ICON));
 
-        JMenuItem sitesItem = new JMenuItem("Site Manager...", iconCache.getIcon(IconCache.Icon.SAVED_ICON));
+        JMenuItem sitesItem = new JMenuItem("站点管理", iconCache.getIcon(IconCache.Icon.SAVED_ICON));
         sitesItem.setMnemonic(KeyEvent.VK_M);
         sitesItem.addActionListener(savedListener);
         sitesDialog = new SiteManagerDialog(sitesItem, iconCache);
 
-        anonymousItem = new JCheckBoxMenuItem("Block Anonymous Requests");
-        anonymousItem.setToolTipText("Blocks all requests that do no contain a valid certificate/signature");
+        anonymousItem = new JCheckBoxMenuItem("阻止匿名请求");
+        anonymousItem.setToolTipText("阻止所有不含合法签名的请求");
         anonymousItem.setMnemonic(KeyEvent.VK_K);
         anonymousItem.setState(Certificate.UNKNOWN.isBlocked());
         anonymousItem.addActionListener(anonymousListener);
 
-        JMenuItem logItem = new JMenuItem("View Logs...", iconCache.getIcon(IconCache.Icon.LOG_ICON));
+        JMenuItem logItem = new JMenuItem("查看日志", iconCache.getIcon(IconCache.Icon.LOG_ICON));
         logItem.setMnemonic(KeyEvent.VK_L);
         logItem.addActionListener(logListener);
         logDialog = new LogDialog(logItem, iconCache);
 
-        JCheckBoxMenuItem notificationsItem = new JCheckBoxMenuItem("Show all notifications");
-        notificationsItem.setToolTipText("Shows all connect/disconnect messages, useful for debugging purposes");
+        JCheckBoxMenuItem notificationsItem = new JCheckBoxMenuItem("显示所有通知");
+        notificationsItem.setToolTipText("显示所有连接／断开消息，可以帮助调试");
         notificationsItem.setMnemonic(KeyEvent.VK_S);
         notificationsItem.setState(prefs.getBoolean(notificationsKey, false));
         notificationsItem.addActionListener(notificationsListener);
 
-        JMenuItem openItem = new JMenuItem("Open file location", iconCache.getIcon(IconCache.Icon.FOLDER_ICON));
+        JMenuItem openItem = new JMenuItem("打开所在位置", iconCache.getIcon(IconCache.Icon.FOLDER_ICON));
         openItem.setMnemonic(KeyEvent.VK_O);
         openItem.addActionListener(openListener);
 
-        JMenuItem desktopItem = new JMenuItem("Create Desktop shortcut", iconCache.getIcon(IconCache.Icon.DESKTOP_ICON));
+        JMenuItem desktopItem = new JMenuItem("创建桌面快捷方式", iconCache.getIcon(IconCache.Icon.DESKTOP_ICON));
         desktopItem.setMnemonic(KeyEvent.VK_D);
         desktopItem.addActionListener(desktopListener);
 
@@ -192,11 +192,11 @@ public class TrayManager {
         advancedMenu.add(desktopItem);
 
 
-        JMenuItem reloadItem = new JMenuItem("Reload", iconCache.getIcon(IconCache.Icon.RELOAD_ICON));
+        JMenuItem reloadItem = new JMenuItem("重启", iconCache.getIcon(IconCache.Icon.RELOAD_ICON));
         reloadItem.setMnemonic(KeyEvent.VK_R);
         reloadItem.addActionListener(reloadListener);
 
-        JMenuItem aboutItem = new JMenuItem("About...", iconCache.getIcon(IconCache.Icon.ABOUT_ICON));
+        JMenuItem aboutItem = new JMenuItem("关于", iconCache.getIcon(IconCache.Icon.ABOUT_ICON));
         aboutItem.setMnemonic(KeyEvent.VK_B);
         aboutItem.addActionListener(aboutListener);
         aboutDialog = new AboutDialog(aboutItem, iconCache, name);
@@ -211,12 +211,12 @@ public class TrayManager {
 
         JSeparator separator = new JSeparator();
 
-        JCheckBoxMenuItem startupItem = new JCheckBoxMenuItem("Automatically start");
+        JCheckBoxMenuItem startupItem = new JCheckBoxMenuItem("开机自动运行");
         startupItem.setMnemonic(KeyEvent.VK_S);
         startupItem.setState(shortcutCreator.hasStartupShortcut());
         startupItem.addActionListener(startupListener);
 
-        JMenuItem exitItem = new JMenuItem("Exit", iconCache.getIcon(IconCache.Icon.EXIT_ICON));
+        JMenuItem exitItem = new JMenuItem("退出", iconCache.getIcon(IconCache.Icon.EXIT_ICON));
         exitItem.addActionListener(exitListener);
 
         popup.add(advancedMenu);
@@ -322,7 +322,7 @@ public class TrayManager {
     private final ActionListener exitListener = new ActionListener() {
         public void actionPerformed(ActionEvent e) {
             boolean showAllNotifications = prefs.getBoolean(notificationsKey, false);
-            if (!showAllNotifications || confirmDialog.prompt("Exit " + name + "?")) { exit(0); }
+            if (!showAllNotifications || confirmDialog.prompt("退出 " + name + "?")) { exit(0); }
         }
     };
 
@@ -386,26 +386,26 @@ public class TrayManager {
 
     public boolean showGatewayDialog(final Certificate cert, final String prompt) {
         if (cert == null) {
-            displayErrorMessage("Invalid certificate");
+            displayErrorMessage("非法证书");
             return false;
         } else {
             try {
                 SwingUtilities.invokeAndWait(new Runnable() {
                     @Override
                     public void run() {
-                        gatewayDialog.prompt("%s wants to " + prompt, cert);
+                        gatewayDialog.prompt("%s 想要 " + prompt, cert);
                     }
                 });
             }
             catch(Exception ignore) {}
 
             if (gatewayDialog.isApproved()) {
-                log.info("Allowed {} to {}", cert.getCommonName(), prompt);
+                log.info("允许 {} 动作 {}", cert.getCommonName(), prompt);
                 if (gatewayDialog.isPersistent()) {
                     whiteList(cert);
                 }
             } else {
-                log.info("Denied {} to {}", cert.getCommonName(), prompt);
+                log.info("拒绝 {} 动作 {}", cert.getCommonName(), prompt);
                 if (gatewayDialog.isPersistent()) {
                     if (Certificate.UNKNOWN.equals(cert)) {
                         anonymousItem.doClick(); // if always block anonymous requests -> flag menu item
