@@ -24,6 +24,7 @@ import org.eclipse.jetty.websocket.servlet.WebSocketServletFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.Constants;
+import qz.common.SecurityInfo;
 import qz.common.TrayManager;
 import qz.deploy.DeployUtilities;
 import qz.utils.SystemUtilities;
@@ -31,10 +32,7 @@ import qz.utils.SystemUtilities;
 import javax.swing.*;
 import java.io.File;
 import java.net.BindException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -62,8 +60,25 @@ public class PrintSocketServer {
                 System.out.println(Constants.VERSION);
                 System.exit(0);
             }
+            // Print library list and exits
+            if ("-l".equals(s) || "--libinfo".equals(s)) {
+                String format = "%-40s%s%n";
+                System.out.printf(format, "LIBRARY NAME:", "VERSION:");
+                SortedMap<String, String> libVersions = SecurityInfo.getLibVersions();
+                for (Map.Entry<String, String> entry: libVersions.entrySet()) {
+                    if (entry.getValue() == null) {
+                        System.out.printf(format, entry.getKey(), "(unknown)");
+                    } else {
+                        System.out.printf(format, entry.getKey(), entry.getValue());
+                    }
+                }
+                System.exit(0);
+            }
         }
 
+        log.info(Constants.ABOUT_TITLE + " version: {}", Constants.VERSION);
+        log.info(Constants.ABOUT_TITLE + " vendor: {}", Constants.ABOUT_COMPANY);
+        log.info("Java version: {}", Constants.JAVA_VERSION.toString());
         setupFileLogging();
 
         try {
@@ -95,6 +110,7 @@ public class PrintSocketServer {
         fileAppender.setFile(SystemUtilities.getDataDirectory() + File.separator + Constants.LOG_FILE + ".log");
         fileAppender.setRollingPolicy(rollingPolicy);
         fileAppender.setTriggeringPolicy(triggeringPolicy);
+        fileAppender.setEncoding("UTF-8");
 
         fileAppender.setImmediateFlush(true);
         fileAppender.activateOptions();

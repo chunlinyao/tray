@@ -7,6 +7,7 @@ import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.WebSocketException;
 import org.eclipse.jetty.websocket.api.annotations.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -177,7 +178,7 @@ public class PrintSocketClient {
                 }
                 catch(CertificateParsingException ignore) {}
 
-                if (allowedFromDialog(certificate, "connect to QZ")) {
+                if (allowedFromDialog(certificate, "connect to " + Constants.ABOUT_TITLE)) {
                     sendResult(session, UID, null);
                 } else {
                     sendError(session, UID, "Connection blocked by client");
@@ -238,7 +239,7 @@ public class PrintSocketClient {
 
         if (call == Method.INVALID && (UID == null || UID.isEmpty())) {
             //incorrect message format, likely incompatible qz version
-            session.close(4003, "Connected to incompatible QZ Tray version");
+            session.close(4003, "Connected to incompatible " + Constants.ABOUT_TITLE + " version");
             return;
         }
 
@@ -460,7 +461,15 @@ public class PrintSocketClient {
         }
     }
 
-    private boolean allowedFromDialog(Certificate certificate, String prompt) {
+    private boolean allowedFromDialog(Certificate cert, String prompt) {
+        //If cert can be resolved before the lock, do so and return
+        if (cert == null || cert.isBlocked()) {
+            return false;
+        }
+        if (cert.isTrusted() && cert.isSaved()) {
+            return true;
+        }
+
         //wait until previous prompts are closed
         try {
             dialogAvailable.acquire();
@@ -471,7 +480,7 @@ public class PrintSocketClient {
         }
 
         //prompt user for access
-        boolean allowed = trayManager.showGatewayDialog(certificate, prompt);
+        boolean allowed = trayManager.showGatewayDialog(cert, prompt);
 
         dialogAvailable.release();
 
@@ -556,11 +565,11 @@ public class PrintSocketClient {
      * @param session WebSocket session
      * @param reply   JSON Object of reply to web API
      */
-    private static synchronized void send(Session session, JSONObject reply) {
+    private static synchronized void send(Session session, JSONObject reply) throws WebSocketException {
         try {
             session.getRemote().sendString(reply.toString());
         }
-        catch(Exception e) {
+        catch(IOException e) {
             log.error("Could not send message", e);
         }
     }
