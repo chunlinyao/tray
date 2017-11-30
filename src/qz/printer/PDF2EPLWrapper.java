@@ -9,27 +9,17 @@
  */
 package qz.printer;
 
-import org.apache.commons.ssl.Base64;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
-import org.codehaus.jettison.json.JSONException;
-import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.ByteArrayBuilder;
 import qz.exception.InvalidRawImageException;
-import qz.utils.ByteUtilities;
 
-import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
-import java.awt.image.ColorModel;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.net.URL;
 import java.nio.charset.Charset;
 
 /**
@@ -38,7 +28,7 @@ import java.nio.charset.Charset;
  * @author Yao Chunlin
  */
 @SuppressWarnings("UnusedDeclaration") //Library class
-public class PDFWrapper {
+public class PDF2EPLWrapper {
 
 
     public void setCropType(CropType cropType) {
@@ -48,7 +38,7 @@ public class PDFWrapper {
     public enum CropType {
         TOP, BOTTOM, NONE, BOTH;
     }
-    private static final Logger log = LoggerFactory.getLogger(PDFWrapper.class);
+    private static final Logger log = LoggerFactory.getLogger(PDF2EPLWrapper.class);
     private final LanguageType languageType;
     private final PDDocument pdfdoc;
     private int dpi;
@@ -60,12 +50,12 @@ public class PDFWrapper {
     private CropType cropType = CropType.NONE;
     /**
      * Creates a new
-     * <code>PDFWrapper</code> from a
+     * <code>PDF2EPLWrapper</code> from a
      * <code>PDDocument.</code>
      *
      * @param pdfdoc The PDF document to convert for thermal printing
      */
-    public PDFWrapper(PDDocument pdfdoc, LanguageType languageType) {
+    public PDF2EPLWrapper(PDDocument pdfdoc, LanguageType languageType) {
         this.pdfdoc = pdfdoc;
         this.languageType = languageType;
         log.info("Loading PDF document with {} pages", pdfdoc.getNumberOfPages());

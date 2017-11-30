@@ -118,7 +118,7 @@ public class PrintRaw implements PrintProcessor {
         }
     }
 
-    private PDFWrapper getPDFWrapper(String cmd, JSONObject opt) throws IOException, JSONException {
+    private PDF2EPLWrapper getPDFWrapper(String cmd, JSONObject opt) throws IOException, JSONException {
         PDDocument pdfdoc;
         if (cmd.startsWith("data:application/pdf") && cmd.contains(";base64,")) {
             String[] parts = cmd.split(";base64,");
@@ -131,7 +131,7 @@ public class PrintRaw implements PrintProcessor {
             pdfdoc = PDDocument.load(new URL(cmd).openStream());
         }
 
-        PDFWrapper pdfWrapper = new PDFWrapper(pdfdoc, LanguageType.getType(opt.optString("language")));
+        PDF2EPLWrapper pdfWrapper = new PDF2EPLWrapper(pdfdoc, LanguageType.getType(opt.optString("language")));
         pdfWrapper.setCharset(Charset.forName(encoding));
 
         int dpi = opt.optInt("dpi", -1);
@@ -140,7 +140,7 @@ public class PrintRaw implements PrintProcessor {
         }
         pdfWrapper.setDPI(dpi);
 
-        PDFWrapper.CropType cropType = PDFWrapper.CropType.valueOf(opt.optString("crop", "NONE").toUpperCase(Locale.ENGLISH));
+        PDF2EPLWrapper.CropType cropType = PDF2EPLWrapper.CropType.valueOf(opt.optString("crop", "NONE").toUpperCase(Locale.ENGLISH));
         pdfWrapper.setCropType(cropType);
         //ESCP only
         int density = opt.optInt("dotDensity", -1);
