@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * @version 2.0.4;
+ * @version 2.0.5;
  * @overview QZ Tray Connector
  * <p/>
  * Connects a web client to the QZ Tray software.
@@ -28,7 +28,7 @@ var qz = (function() {
 ///// PRIVATE METHODS /////
 
     var _qz = {
-        VERSION: "2.0.4",                              //must match @version above
+        VERSION: "2.0.5",                              //must match @version above
         DEBUG: false,
 
         log: {
@@ -158,6 +158,9 @@ var qz = (function() {
                         //called for errors during setup (such as invalid ports), reject connect promise only if all ports have been tried
                         _qz.websocket.connection.onerror = function(evt) {
                             _qz.log.trace(evt);
+
+                            _qz.websocket.connection = null;
+
                             deeper();
                         };
                     } else {
@@ -677,7 +680,6 @@ var qz = (function() {
                             if (options && count < options.retries) {
                                 attempt(count + 1);
                             } else {
-                                _qz.websocket.connection = null;
                                 reject.apply(null, arguments);
                             }
                         };
