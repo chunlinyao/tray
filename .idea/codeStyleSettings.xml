@@ -14,13 +14,6 @@
         <option name="HTML_INLINE_ELEMENTS" value="" />
         <option name="HTML_DONT_ADD_BREAKS_IF_INLINE_CONTENT" value="title,h1,h2,h3,h4,h5,h6,p,span,br,em,strong,li,a" />
         <option name="FORMATTER_TAGS_ENABLED" value="true" />
-        <CssCodeStyleSettings>
-          <option name="HEX_COLOR_UPPER_CASE" value="true" />
-        </CssCodeStyleSettings>
-        <JSCodeStyleSettings>
-          <option name="SPACE_BEFORE_FUNCTION_LEFT_PARENTH" value="false" />
-          <option name="SPACES_WITHIN_OBJECT_LITERAL_BRACES" value="true" />
-        </JSCodeStyleSettings>
         <XML>
           <option name="XML_LEGACY_SETTINGS_IMPORTED" value="true" />
         </XML>
