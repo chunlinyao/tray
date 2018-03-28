@@ -349,6 +349,18 @@ public class ImageWrapper {
             case BRASTER:
                 appendBrotherRasterSlices(getByteBuffer());
                 break;
+            case SBPL:
+                validateImageHeight();
+                byte[] esc = new byte[] {0x1b};
+                StringBuilder sbpl = new StringBuilder()
+                        .append(esc).append("H").append(getxPos())
+                        .append(esc).append("V").append(getyPos())
+                        .append(esc).append("GB")
+                        .append(String.format("%03d", getWidth() / 8))
+                        .append(String.format("%03d", getHeight() / 8));
+
+                getByteBuffer().append(sbpl, charset).append(getBytes());
+                break;
             default:
                 throw new InvalidRawImageException(charset.name() + " image conversion is not yet supported.");
         }
@@ -626,6 +638,27 @@ public class ImageWrapper {
         if (width % 8 != 0) {
             int newWidth = (width / 8 + 1) * 8;
             BufferedImage newBufferedImage = new BufferedImage(newWidth, height,
+                                                               BufferedImage.TYPE_INT_ARGB);
+
+            Graphics2D g = newBufferedImage.createGraphics();
+            g.drawImage(oldBufferedImage, 0, 0, null);
+            g.dispose();
+            setBufferedImage(newBufferedImage);
+            init();
+        }
+    }
+
+    /**
+     * Checks if the image height is a multiple of 8, and if it's not,
+     * pads the image on the right side with blank pixels. <br />
+     */
+    private void validateImageHeight() {
+        BufferedImage oldBufferedImage = bufferedImage;
+        int height = oldBufferedImage.getHeight();
+        int width = oldBufferedImage.getWidth();
+        if (height % 8 != 0) {
+            int newHeight = (height / 8 + 1) * 8;
+            BufferedImage newBufferedImage = new BufferedImage(width, newHeight,
                                                                BufferedImage.TYPE_INT_ARGB);
 
             Graphics2D g = newBufferedImage.createGraphics();

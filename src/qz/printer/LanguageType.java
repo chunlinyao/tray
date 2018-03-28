@@ -27,8 +27,9 @@ public enum LanguageType {
     CPCL(false, true),
     ESCP(false, false, "ESC", "ESC/P"),
     ESCP2(false, false, "ESC/P2"),
-    BRASTER(false, false, "BRASTER"), //Brother TD4000 RASTER
+    BRASTER(false, false), //Brother TD4000 RASTER
     ESCPOS(false, false, "ESC/POS", "EPSON"),
+    SBPL(true, true),
     UNKNOWN(false, false);
 
 
