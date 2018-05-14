@@ -51,6 +51,7 @@ public class PrintSocketServer {
 
     private static TrayManager trayManager;
     private static Properties trayProperties;
+    private static SerialProxyServer serialProxy;
 
 
     public static void main(String[] args) {
@@ -88,7 +89,9 @@ public class PrintSocketServer {
                     trayManager = new TrayManager();
                 }
             });
+            runSerialProxy();
             runServer();
+            stopSerialProxy();
         }
         catch(Exception e) {
             log.error("Could not start tray manager", e);
@@ -118,6 +121,23 @@ public class PrintSocketServer {
         org.apache.log4j.Logger.getRootLogger().addAppender(fileAppender);
     }
 
+    public static void runSerialProxy() {
+        trayProperties = getTrayProperties();
+        if (trayProperties != null) {
+            if (trayProperties.getProperty("serial.proxy", "false").equals("true")) {
+                String portName = trayProperties.getProperty("serial.portName", "COM1");
+                String tcpPort = trayProperties.getProperty("serial.tcpPort", "9100");
+                serialProxy = new SerialProxyServer(portName, tcpPort);
+                serialProxy.start();
+            }
+        }
+    }
+
+    public static void stopSerialProxy() {
+        if (serialProxy != null) {
+            serialProxy.stop();
+        }
+    }
     public static void runServer() {
         final AtomicBoolean running = new AtomicBoolean(false);
         final AtomicInteger securePortIndex = new AtomicInteger(0);
