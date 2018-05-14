@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * @version 2.0.5;
+ * @version 2.0.6;
  * @overview QZ Tray Connector
  * <p/>
  * Connects a web client to the QZ Tray software.
@@ -28,7 +28,7 @@ var qz = (function() {
 ///// PRIVATE METHODS /////
 
     var _qz = {
-        VERSION: "2.0.5",                              //must match @version above
+        VERSION: "2.0.6",                              //must match @version above
         DEBUG: false,
 
         log: {
@@ -203,11 +203,20 @@ var qz = (function() {
 
                         if (obj.timestamp == undefined) {
                             obj.timestamp = Date.now();
+                            if (typeof obj.timestamp !== 'number') {
+                                obj.timestamp = new Date().getTime();
+                            }
                         }
                         if (obj.promise != undefined) {
                             obj.uid = _qz.websocket.setup.newUID();
                             _qz.websocket.pendingCalls[obj.uid] = obj.promise;
                         }
+
+                        // track requesting monitor
+                        obj.position = {
+                            x: screen ? ((screen.availWidth || screen.width) / 2) + (screen.left || screen.availLeft) : 0,
+                            y: screen ? ((screen.availHeight || screen.height) / 2) + (screen.top || screen.availTop) : 0
+                        };
 
                         try {
                             if (obj.call != undefined && obj.signature == undefined) {
@@ -379,6 +388,7 @@ var qz = (function() {
                 fallbackDensity: null,
                 interpolation: 'bicubic',
                 jobName: null,
+                legacy: false,
                 margins: 0,
                 orientation: null,
                 paperThickness: null,
@@ -820,6 +830,7 @@ var qz = (function() {
              *  @param {number} [options.fallbackDensity=null] Value used when default density value cannot be read, or in cases where reported as "Normal" by the driver, (in DPI, DPMM, or DPCM depending on <code>[options.units]</code>).
              *  @param {string} [options.interpolation='bicubic'] Valid values <code>[bicubic | bilinear | nearest-neighbor]</code>. Controls how images are handled when resized.
              *  @param {string} [options.jobName=null] Name to display in print queue.
+             *  @param {boolean} [options.legacy=false] If legacy style printing should be used.
              *  @param {Object|number} [options.margins=0] If just a number is provided, it is used as the margin for all sides.
              *   @param {number} [options.margins.top=0]
              *   @param {number} [options.margins.right=0]
@@ -893,6 +904,9 @@ var qz = (function() {
          *   @param {number} [data.options.x] Optional with <code>[raw]</code> type <code>[image]</code> format. The X position of the image.
          *   @param {number} [data.options.y] Optional with <code>[raw]</code> type <code>[image]</code> format. The Y position of the image.
          *   @param {string|number} [data.options.dotDensity] Optional with <code>[raw]</code> type <code>[image]</code> format.
+         *   @param {number} [data.precision=128] Optional with <code>[raw]</code> type <code>[image]</code> format. Bit precision of the ribbons.
+         *   @param {boolean|string|Array<Array<number>>} [data.options.overlay=false] Optional with <code>[raw]</code> type <code>[image]</code> format.
+         *      Boolean sets entire layer, string sets mask image, Array sets array of rectangles in format <code>[x1,y1,x2,y2]</code>.
          *   @param {string} [data.options.xmlTag] Required with <code>[xml]</code> format. Tag name containing base64 formatted data.
          *   @param {number} [data.options.pageWidth] Optional with <code>[html]</code> type printing. Width of the web page to render. Defaults to paper width.
          *   @param {number} [data.options.pageHeight] Optional with <code>[html]</code> type printing. Height of the web page to render. Defaults to adjusted web page height.
@@ -915,6 +929,9 @@ var qz = (function() {
                             || (data[i].format.toUpperCase() === 'PDF' && !(data[i].data.indexOf("data:application/") === 0 && data[i].data.indexOf(";base64,") !== 0))
                         || data[i].format.toUpperCase() === 'XML'))) {
                         data[i].data = _qz.tools.absolute(data[i].data);
+                    }
+                    if (data[i].options && typeof data[i].options.overlay === 'string') {
+                        data[i].options.overlay = _qz.tools.absolute(data[i].options.overlay);
                     }
                 }
             }
@@ -958,19 +975,24 @@ var qz = (function() {
 
             /**
              * @param {string} port Name of port to open.
-             * @param {Object} bounds Boundaries of serial port output.
-             *  @param {string} [bounds.begin=0x0002] Character denoting start of serial response. Not used if <code>width</code is provided.
-             *  @param {string} [bounds.end=0x000D] Character denoting end of serial response. Not used if <code>width</code> is provided.
-             *  @param {number} [bounds.width] Used for fixed-width response serial communication.
+             * @param {Object} [options] Boundaries of serial port output.
+             *  @param {string} [options.start=0x0002] Character denoting start of serial response. Not used if <code>width</code is provided.
+             *  @param {string} [options.end=0x000D] Character denoting end of serial response. Not used if <code>width</code> is provided.
+             *  @param {number} [options.width] Used for fixed-width response serial communication.
+             *  @param {string} [options.baudRate=9600]
+             *  @param {string} [options.dataBits=8]
+             *  @param {string} [options.stopBits=1]
+             *  @param {string} [options.parity='NONE'] Valid values <code>[NONE| EVEN | ODD | MARK | SPACE]</code>
+             *  @param {string} [options.flowControl='NONE'] Valid values <code>[NONE | XONXOFF | XONXOFF_OUT | XONXOFF_IN | RTSCTS | RTSCTS_OUT | RTSCTS_IN]</code>
              *
              * @returns {Promise<null|Error>}
              *
              * @memberof qz.serial
              */
-            openPort: function(port, bounds) {
+            openPort: function(port, options) {
                 var params = {
                     port: port,
-                    bounds: bounds
+                    options: options
                 };
                 return _qz.websocket.dataPromise('serial.openPort', params);
             },
@@ -981,12 +1003,12 @@ var qz = (function() {
              *
              * @param {string} port An open port to send data over.
              * @param {string} data The data to send to the serial device.
-             * @param {Object} [properties] Properties of data being sent over the serial port.
+             * @param {Object} [properties] DEPRECATED: Properties of data being sent over the serial port.
              *  @param {string} [properties.baudRate=9600]
              *  @param {string} [properties.dataBits=8]
              *  @param {string} [properties.stopBits=1]
              *  @param {string} [properties.parity='NONE'] Valid values <code>[NONE| EVEN | ODD | MARK | SPACE]</code>
-             *  @param {string} [properties.flowControl='NONE'] Valid values <code>[NONE | XONXOFF_OUT | XONXOFF_IN | RTSCTS_OUT | RTSCTS_IN]</code>
+             *  @param {string} [properties.flowControl='NONE'] Valid values <code>[NONE | XONXOFF | XONXOFF_OUT | XONXOFF_IN | RTSCTS | RTSCTS_OUT | RTSCTS_IN]</code>
              *
              * @returns {Promise<null|Error>}
              *
@@ -995,6 +1017,10 @@ var qz = (function() {
              * @memberof qz.serial
              */
             sendData: function(port, data, properties) {
+                if (properties != null) {
+                    _qz.log.warn("Properties object is deprecated on sendData calls, use openPort instead.");
+                }
+
                 var params = {
                     port: port,
                     data: data,

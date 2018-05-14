@@ -95,7 +95,7 @@ public class PrintRaw implements PrintProcessor {
                         commands.append(FileUtilities.readRawFile(cmd));
                         break;
                     case IMAGE:
-                        commands.append(getImageWrapper(cmd, opt).getImageCommand());
+                        commands.append(getImageWrapper(cmd, opt).getImageCommand(opt));
                         break;
                     case HEX:
                         commands.append(ByteUtilities.hexStringToByteArray(cmd));
@@ -104,7 +104,7 @@ public class PrintRaw implements PrintProcessor {
                         commands.append(Base64.decodeBase64(FileUtilities.readXMLFile(cmd, opt.optString("xmlTag"))));
                         break;
                     case PDF:
-                        commands.append(getPDFWrapper(cmd, opt).getImageCommand());
+                        commands.append(getPDFWrapper(cmd, opt).getImageCommand(opt));
                         break;
                     case PLAIN:
                     default:

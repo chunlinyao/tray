@@ -21,6 +21,7 @@ import qz.utils.*;
 import javax.print.PrintServiceLookup;
 import javax.security.cert.CertificateParsingException;
 import javax.usb.util.UsbUtil;
+import java.awt.*;
 import java.io.IOException;
 import java.io.Reader;
 import java.util.HashMap;
@@ -178,7 +179,8 @@ public class PrintSocketClient {
                 }
                 catch(CertificateParsingException ignore) {}
 
-                if (allowedFromDialog(certificate, "connect to " + Constants.ABOUT_TITLE)) {
+                if (allowedFromDialog(certificate, "connect to " + Constants.ABOUT_TITLE,
+                                      findDialogPosition(session, json.optJSONObject("position")))) {
                     sendResult(session, UID, null);
                 } else {
                     sendError(session, UID, "Connection blocked by client");
@@ -255,7 +257,8 @@ public class PrintSocketClient {
             }
         }
 
-        if (call.isDialogShown() && !allowedFromDialog(shownCertificate, prompt)) {
+        if (call.isDialogShown()
+                && !allowedFromDialog(shownCertificate, prompt, findDialogPosition(session, json.optJSONObject("position")))) {
             sendError(session, UID, "Request blocked");
             return;
         }
@@ -293,10 +296,14 @@ public class PrintSocketClient {
                 SerialUtilities.setupSerialPort(session, UID, connection, params);
                 break;
             case SERIAL_SEND_DATA: {
-                SerialProperties props = new SerialProperties(params.optJSONObject("properties"));
+                SerialProperties props = null;
+                if (!params.isNull("properties")) {
+                    props = new SerialProperties(params.optJSONObject("properties"));
+                }
+
                 SerialIO serial = connection.getSerialPort(params.optString("port"));
                 if (serial != null) {
-                    serial.sendData(props, params.optString("data"));
+                    serial.sendData(params.optString("data"), props);
                     sendResult(session, UID, null);
                 } else {
                     sendError(session, UID, String.format("Serial port [%s] must be opened first.", params.optString("port")));
@@ -460,7 +467,7 @@ public class PrintSocketClient {
         }
     }
 
-    private boolean allowedFromDialog(Certificate cert, String prompt) {
+    private boolean allowedFromDialog(Certificate cert, String prompt, Point position) {
         //If cert can be resolved before the lock, do so and return
         if (cert == null || cert.isBlocked()) {
             return false;
@@ -479,11 +486,20 @@ public class PrintSocketClient {
         }
 
         //prompt user for access
-        boolean allowed = trayManager.showGatewayDialog(cert, prompt);
+        boolean allowed = trayManager.showGatewayDialog(cert, prompt, position);
 
         dialogAvailable.release();
 
         return allowed;
+    }
+
+    private Point findDialogPosition(Session session, JSONObject positionData) {
+        Point pos = new Point(0, 0);
+        if (session.getRemoteAddress().getAddress().isLoopbackAddress() && positionData != null) {
+            pos.move(positionData.optInt("x"), positionData.optInt("y"));
+        }
+
+        return pos;
     }
 
 

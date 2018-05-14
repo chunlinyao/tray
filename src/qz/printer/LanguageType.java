@@ -29,6 +29,7 @@ public enum LanguageType {
     ESCP2(false, false, "ESC/P2"),
     BRASTER(false, false), //Brother TD4000 RASTER
     ESCPOS(false, false, "ESC/POS", "EPSON"),
+    EVOLIS(false, false),
     SBPL(true, true),
     UNKNOWN(false, false);
 

@@ -11,6 +11,7 @@ import org.eclipse.jetty.websocket.api.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.communication.SerialIO;
+import qz.communication.SerialProperties;
 import qz.exception.SerialException;
 import qz.ws.PrintSocketClient;
 import qz.ws.SocketConnection;
@@ -204,22 +205,26 @@ public class SerialUtilities {
             case "none":
                 log.trace("Parsed serial setting: FLOWCONTROL_NONE");
                 return SerialPort.FLOWCONTROL_NONE;
-            case "x":
-            case "xonxoff":
-            case "xonxoff_out":
-                log.trace("Parsed serial setting: FLOWCONTROL_XONXOFF_OUT");
-                return SerialPort.FLOWCONTROL_XONXOFF_OUT;
             case "xonxoff_in":
                 log.trace("Parsed serial setting: FLOWCONTROL_XONXOFF_IN");
                 return SerialPort.FLOWCONTROL_XONXOFF_IN;
-            case "p":
-            case "rtscts":
-            case "rtscts_out":
-                log.trace("Parsed serial setting: FLOWCONTROL_RTSCTS_OUT");
-                return SerialPort.FLOWCONTROL_RTSCTS_OUT;
+            case "xonxoff_out":
+                log.trace("Parsed serial setting: FLOWCONTROL_XONXOFF_OUT");
+                return SerialPort.FLOWCONTROL_XONXOFF_OUT;
+            case "x":
+            case "xonxoff":
+                log.trace("Parsed serial setting: FLOWCONTROL_XONXOFF_INOUT");
+                return SerialPort.FLOWCONTROL_XONXOFF_IN | SerialPort.FLOWCONTROL_XONXOFF_OUT;
             case "rtscts_in":
                 log.trace("Parsed serial setting: FLOWCONTROL_RTSCTS_IN");
                 return SerialPort.FLOWCONTROL_RTSCTS_IN;
+            case "rtscts_out":
+                log.trace("Parsed serial setting: FLOWCONTROL_RTSCTS_OUT");
+                return SerialPort.FLOWCONTROL_RTSCTS_OUT;
+            case "p":
+            case "rtscts":
+                log.trace("Parsed serial setting: FLOWCONTROL_RTSCTS_INOUT");
+                return SerialPort.FLOWCONTROL_RTSCTS_IN | SerialPort.FLOWCONTROL_RTSCTS_OUT;
             default:
                 log.error("Flow control value of {} could not be parsed", control);
                 return -1;
@@ -291,18 +296,11 @@ public class SerialUtilities {
             return;
         }
 
-        final SerialIO serial;
-        JSONObject bounds = params.getJSONObject("bounds");
-        if (bounds.isNull("width")) {
-            serial = new SerialIO(portName,
-                                  SerialUtilities.characterBytes(bounds.optString("start", "0x0002")),
-                                  SerialUtilities.characterBytes(bounds.optString("end", "0x000D")));
-        } else {
-            serial = new SerialIO(portName, bounds.getInt("width"));
-        }
-
         try {
-            if (serial.open()) {
+            SerialProperties props = new SerialProperties(params.optJSONObject("options"));
+            final SerialIO serial = new SerialIO(portName);
+
+            if (serial.open(props)) {
                 connection.addSerialPort(portName, serial);
 
                 //apply listener here, so we can send all replies to the browser

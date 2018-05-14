@@ -1,8 +1,8 @@
-#!/usr/bin/perl
 #
+# Python Odoo example for controller.py
 # Echoes the signed message and exits
-# usage:  ./sign-message.pl "test"
 #
+
 #########################################################
 #             WARNING   WARNING   WARNING               #
 #########################################################
@@ -22,31 +22,22 @@
 #                                                       #
 #########################################################
 
-# RSA Crypto libs provided by:
-#     Debian: libcrypt-openssl-rsa-perl
-#     RedHat: perl-Crypt-OpenSSL-RSA
-use Crypt::OpenSSL::RSA;
-use MIME::Base64 qw(encode_base64);
+from odoo import http
+from odoo.http import request
+from OpenSSL import crypto
+import base64
 
-# Get first argument passed to script
-my $request = $ARGV[0];
 
-# Path to the private key
-my $pem_file = "private-key.pem";
+class SignMessage(http.Controller):
 
-# Read private key
-my $private_key = do {
-    local $/ = undef;
-    open my $fh, "<", $pem_file
-        or die "could not open $file: $!";
-    <$fh>;
-};
-
-# Load private key
-my $rsa = Crypt::OpenSSL::RSA->new_private_key($private_key);
-
-# Create signature
-$rsa->use_sha1_hash();
-my $sig = encode_base64($rsa->sign($request));
-
-print $sig;
+    @http.route('/sign-message/', auth='public')
+    def index(self, **kwargs):
+        mypass = None
+        key_file = open('path/to/private-key.pem', 'r')
+        key = key_file.read()
+        key_file.close()
+        password = None
+        pkey = crypto.load_privatekey(crypto.FILETYPE_PEM, key, password)
+        sign = crypto.sign(pkey, kwargs.get('request', ''), 'sha1')
+        data_base64 = base64.b64encode(sign)
+        return request.make_response(data_base64, [('Content-Type', 'text/plain')])

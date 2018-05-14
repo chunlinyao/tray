@@ -12,6 +12,7 @@ package qz.printer;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
+import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.ByteArrayBuilder;
@@ -69,14 +70,14 @@ public class PDF2EPLWrapper {
      * @return The commands to print the pdf as an array of bytes, ready to be
      * sent to the printer
      */
-    public byte[] getImageCommand() throws InvalidRawImageException, IOException {
+    public byte[] getImageCommand(JSONObject opt) throws InvalidRawImageException, IOException {
         getByteBuffer().clear();
         int numberOfPages = pdfdoc.getNumberOfPages();
         PDFRenderer pdfRenderer = new PDFRenderer(pdfdoc);
         for (int pageIndex = 0; pageIndex < numberOfPages; pageIndex ++) {
             BufferedImage bim = pdfRenderer.renderImageWithDPI(pageIndex, dpi, ImageType.RGB);
             bim = getCroppedImage(bim, cropType);
-            getByteBuffer().append(getImageWrapper(bim, pageIndex).getImageCommand());
+            getByteBuffer().append(getImageWrapper(bim, pageIndex).getImageCommand(opt));
         }
         return getByteBuffer().getByteArray();
     }

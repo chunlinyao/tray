@@ -140,6 +140,7 @@
                             <div class="btn-group">
                                 <button type="button" class="btn btn-default" onclick="printEPL();">EPL</button>
                                 <button type="button" class="btn btn-default" onclick="printZPL();">ZPL</button>
+                                <button type="button" class="btn btn-default" onclick="printEvolis();">Evolis</button>
                                 <button type="button" class="btn btn-default" onclick="printESCPOS();">ESC/POS</button>
                                 <button type="button" class="btn btn-default" onclick="printEPCL();">EPCL (Zebra Card Printer)</button>
                             </div>
@@ -303,6 +304,11 @@
                                                 Job Name
                                             </label>
                                             <input type="text" id="pxlJobName" class="form-control pull-right" />
+                                        </div>
+
+                                        <div class="form-group form-inline">
+                                            <label for="pxlLegacy">Legacy Printing</label>
+                                            <input type="checkbox" id="pxlLegacy" class="pull-right" />
                                         </div>
 
                                         <div class="form-group form-inline">
@@ -968,6 +974,23 @@
         qz.print(config, printData).catch(displayError);
     }
 
+    function printEvolis() {
+        var config = getUpdatedConfig();
+
+        var printData = [
+            '\x1BPps;0\x0D',   // Enable raw/disable driver printer parameter supervision
+            '\x1BPwr;0\x0D',   // Landscape (zero degree) orientation
+            '\x1BWcb;k;0\x0D', // Clear card memory
+
+            '\x1BSs\x0D',      // Start of sequence
+            { type: 'raw', format: 'image', data: 'assets/img/fade-test.png', options: { language: "EVOLIS", precision: 128 } },
+            '\x1BWt;50;60;0;30;Printed using QZ Tray ' + qzVersion + '\x0D', // 50,60 = coordinates; 0 = arial font
+            '\x1BSe\x0D'       // End of sequence
+        ];
+
+        qz.print(config, printData).catch(displayError);
+    }
+
     function printESCPOS() {
         var config = getUpdatedConfig();
 
@@ -1221,19 +1244,10 @@
         var widthVal = $("#serialWidth").val();
         if (!widthVal) { widthVal = null; }
 
-        var bounds = {
+        var properties = {
             start: $("#serialStart").val(),
             end: $("#serialEnd").val(),
-            width: widthVal
-        };
-
-        qz.serial.openPort($("#serialPort").val(), bounds).then(function() {
-            displayMessage("Serial port opened");
-        }).catch(displayError);
-    }
-
-    function sendSerialData() {
-        var properties = {
+            width: widthVal,
             baudRate: $("#serialBaud").val(),
             dataBits: $("#serialData").val(),
             stopBits: $("#serialStop").val(),
@@ -1241,7 +1255,13 @@
             flowControl: $("#serialFlow").val()
         };
 
-        qz.serial.sendData($("#serialPort").val(), $("#serialCmd").val(), properties).catch(displayError);
+        qz.serial.openPort($("#serialPort").val(), properties).then(function() {
+            displayMessage("Serial port opened");
+        }).catch(displayError);
+    }
+
+    function sendSerialData() {
+        qz.serial.sendData($("#serialPort").val(), $("#serialCmd").val()).catch(displayError);
     }
 
     function closeSerialPort() {
@@ -1522,6 +1542,7 @@
         $("#pxlDuplex").prop('checked', false);
         $("#pxlInterpolation").val("");
         $("#pxlJobName").val("");
+        $("#pxlLegacy").prop('checked', false);
         $("#pxlOrientation").val("");
         $("#pxlPaperThickness").val(null);
         $("#pxlPrinterTray").val(null);
@@ -1933,6 +1954,7 @@
                             duplex: $("#pxlDuplex").prop('checked'),
                             interpolation: $("#pxlInterpolation").val(),
                             jobName: jobName,
+                            legacy: $("#pxlLegacy").prop('checked'),
                             margins: pxlMargins,
                             orientation: $("#pxlOrientation").val(),
                             paperThickness: $("#pxlPaperThickness").val(),
