@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.Constants;
 import qz.common.TrayManager;
+import qz.ui.LinkLabel;
 
 import javax.swing.*;
 import java.awt.*;
@@ -31,8 +32,10 @@ public class SystemUtilities {
     private static final String OS_NAME = System.getProperty("os.name").toLowerCase();
     private static final Logger log = LoggerFactory.getLogger(TrayManager.class);
 
+    private static Boolean darkMode;
     private static String uname;
     private static String linuxRelease;
+    private static String classProtocol;
 
 
     /**
@@ -205,10 +208,44 @@ public class SystemUtilities {
         return uname;
     }
 
+    public static boolean isDarkMode() {
+        return isDarkMode(false);
+    }
+
+    public static boolean isDarkMode(boolean recheck) {
+        if (darkMode == null || recheck) {
+            // Check for Dark Mode on MacOS
+            if (isMac()) {
+                darkMode = MacUtilities.isDarkMode();
+            } else if (isWindows()) {
+                darkMode = WindowsUtilities.isDarkMode();
+            } else {
+                darkMode = UbuntuUtilities.isDarkMode();
+            }
+        }
+        return darkMode.booleanValue();
+    }
+
+    public static void adjustThemeColors() {
+        if (isDarkMode()) {
+            Constants.WARNING_COLOR = Constants.WARNING_COLOR_LIGHTER;
+            Constants.TRUSTED_COLOR = Constants.TRUSTED_COLOR_LIGHTER;
+        }
+    }
+
     public static boolean setSystemLookAndFeel() {
         try {
             UIManager.getDefaults().put("Button.showMnemonics", Boolean.TRUE);
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            boolean darkulaThemeNeeded = true;
+            if(isUnix() && UbuntuUtilities.isDarkMode()) {
+                darkulaThemeNeeded = false;
+            }
+            if(isDarkMode() && darkulaThemeNeeded) {
+                UIManager.setLookAndFeel("com.bulenkov.darcula.DarculaLaf");
+            } else {
+                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            }
+            adjustThemeColors();
             return true;
         } catch (Exception e) {
             LoggerFactory.getLogger(SystemUtilities.class).warn("Error getting the default look and feel");
@@ -228,10 +265,16 @@ public class SystemUtilities {
             log.debug("Invalid dialog position provided: {}, we'll center on first monitor instead", position);
             dialog.setLocationRelativeTo(null);
             return;
-        };
+        }
 
         //adjust for dpi scaling
-        double dpiScale = getDpiScale();
+        double dpiScale = getWindowScaleFactor();
+        if (dpiScale == 0) {
+            log.debug("Invalid window scale value: {}, we'll center on first monitor instead", dpiScale);
+            dialog.setLocationRelativeTo(null);
+            return;
+        }
+
         Point p = new Point((int)(position.getX() * dpiScale), (int)(position.getY() * dpiScale));
 
         //account for own size when centering
@@ -241,10 +284,54 @@ public class SystemUtilities {
     }
 
     /**
-     * Shim for detecting default screen scaling per issue #284
+     * Shim for detecting window screen-placement scaling
+     * See issues #284, #448
      * @return Logical dpi scale as dpi/96
      */
-    private static double getDpiScale() {
-        return SystemUtilities.isMac() ? 1 : Toolkit.getDefaultToolkit().getScreenResolution() / 96.0;
+    public static double getWindowScaleFactor() {
+        // MacOS is always 1
+        if (isMac()) {
+            return 1;
+        }
+        // Windows/Linux on JDK8 honors scaling
+        if (Constants.JAVA_VERSION.lessThan(Version.valueOf("11.0.0"))) {
+            return Toolkit.getDefaultToolkit().getScreenResolution() / 96.0;
+        }
+        // Windows on JDK11 is always 1
+        if(isWindows()) {
+            return 1;
+        }
+        // Linux on JDK11 requires JNA calls to Gdk
+        return UbuntuUtilities.getScaleFactor();
+    }
+
+    /**
+     * Detects if HiDPI is enabled
+     * Warning: Due to behavioral differences between OSs, JDKs and poor
+     * detection techniques this function should only be used to fix rare
+     * edge-case bugs.
+     *
+     * See also SystemUtilities.getWindowScaleFactor()
+     * @return true if HiDPI is detected
+     */
+    public static boolean isHiDPI() {
+        if(isMac()) {
+            return MacUtilities.getScaleFactor() > 1;
+        } else if(isWindows()) {
+            return Toolkit.getDefaultToolkit().getScreenResolution() / 96.0 > 1;
+        }
+        // Fallback to a JNA Gdk technique
+        return UbuntuUtilities.getScaleFactor() > 1;
+    }
+
+    /**
+     * Detects if running from IDE or jar
+     * @return true if running from a jar, false if running from IDE
+     */
+    public static boolean isJar() {
+        if (classProtocol == null) {
+            classProtocol = SystemUtilities.class.getResource("").getProtocol();
+        }
+        return "jar".equals(classProtocol);
     }
 }

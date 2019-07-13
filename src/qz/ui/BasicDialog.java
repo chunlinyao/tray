@@ -1,6 +1,9 @@
 package qz.ui;
 
 import qz.common.Constants;
+import qz.utils.MacUtilities;
+import qz.utils.ShellUtilities;
+import qz.utils.SystemUtilities;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -151,5 +154,16 @@ public class BasicDialog extends JDialog {
             return iconCache.getIcon(icon);
         }
         return null;
+    }
+
+    @Override
+    public void setVisible(boolean b) {
+        // fix window focus on macOS
+        if (SystemUtilities.isMac() && !GraphicsEnvironment.isHeadless()) {
+            ShellUtilities.executeAppleScript("tell application \"System Events\" \n" +
+                                                      "set frontmost of every process whose unix id is " + MacUtilities.getProcessID() + " to true \n" +
+                                                      "end tell");
+        }
+        super.setVisible(b);
     }
 }

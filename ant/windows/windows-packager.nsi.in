@@ -37,6 +37,11 @@ Section
   ; Kills any running ${project.name} processes
   nsExec::ExecToLog "wmic.exe process where $\"Name like '%java%' and CommandLine like '%${project.filename}.jar%'$\" call terminate"
 
+  ; Set environmental variable for silent install to be picked up by cscript
+  ${If} ${Silent}
+    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("${vendor.name}_silent", "1").r0'
+  ${EndIf}
+
   ; Cleanup for wmic on Windows XP
   SetShellVarContext current
   Delete "$DESKTOP\TempWmicBatchFile.bat"
@@ -48,6 +53,9 @@ Section
   DetailPrint "Cleaning up resources from previous versions..."
   RMDir /r "$INSTDIR\demo\js\3rdparty"
   Delete "$INSTDIR\demo\js\qz-websocket.js"
+
+  ; Remove 2.1 startup entry
+  Delete "$SMSTARTUP\${project.name}.lnk"
 
   File /r "${dist.dir}\*"
 
@@ -94,23 +102,19 @@ Section
 
   ; Remove ${vendor.company} certificates
   nsExec::ExecToLog "cscript.exe //NoLogo //E:jscript $\"$INSTDIR\auth\${windows.keygen.name}$\" $\"$INSTDIR$\" uninstall"
-  
+
   keygen:
   ; Exports a self-signed certificate and properties file
   DetailPrint "Generating a unique certificate for HTTPS support..."
   nsExec::ExecToLog "cscript.exe //NoLogo //E:jscript $\"$INSTDIR\auth\${windows.keygen.name}$\" $\"$INSTDIR$\" install"
   Pop $0
   
-  ${If} ${RunningX64}
-  ${EnableX64FSRedirection}
-  ${EndIf}
-  
   ; Secure websockets is required, handle errors
   ${If} "$0" != "0"
     ${If} "$0" == "${windows.err.java}"
       MessageBox MB_YESNO "Java is required for installation.  Download now?" IDYES true IDNO false
         true:
-          ExecShell "open" "https://java.com/download/"
+          ExecShell "open" "${java.download}"
           MessageBox MB_OK "Click OK after Java is installed to resume installation"
           Goto keygen
         false:
@@ -119,6 +123,10 @@ Section
     ${Else}
         Abort "Installation failed.  Please check log for details."
     ${EndIf}
+  ${EndIf}
+
+  ${If} ${RunningX64}
+  ${EnableX64FSRedirection}
   ${EndIf}
 
   CreateShortCut "$SMPROGRAMS\${project.name}.lnk" "$INSTDIR\${project.filename}.exe" "" "$INSTDIR\${windows.icon}" 0
@@ -143,6 +151,12 @@ Section "Uninstall"
 
   ; Kills any running ${project.name} processes
   nsExec::ExecToLog "wmic.exe process where $\"Name like '%java%' and CommandLine like '%${project.filename}.jar%'$\" call terminate"
+
+  ; Set environmental variable for silent install to be picked up by cscript
+  ${If} ${Silent}
+    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("${vendor.name}_silent", "1").r0'
+  ${EndIf}
+
   ; Cleanup for wmic on Windows XP
   Delete "$DESKTOP\TempWmicBatchFile.bat"
 

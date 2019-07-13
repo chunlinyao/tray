@@ -24,6 +24,7 @@ import qz.utils.PrintingUtilities;
 import qz.utils.SystemUtilities;
 
 import javax.print.attribute.PrintRequestAttributeSet;
+import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.print.PageFormat;
 import java.awt.print.Paper;
@@ -107,12 +108,13 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
         PrintRequestAttributeSet attributes = applyDefaultSettings(pxlOpts, job.getPageFormat(null));
 
         // Disable attributes per https://github.com/qzind/tray/issues/174
-        if (SystemUtilities.isMac()) { // && Constants.JAVA_VERSION.compareWithBuildsTo(Version.valueOf("1.8.0+162")) < 0) {
-            log.warn("MacOS and Java cannot use attributes with PDF prints, disabling");
+        if (SystemUtilities.isMac() && Constants.JAVA_VERSION.compareWithBuildsTo(Version.valueOf("1.8.0+202")) < 0) {
+            log.warn("MacOS and Java < 1.8.0u202 cannot use attributes with PDF prints, disabling");
             attributes.clear();
         }
 
         Scaling scale = (pxlOpts.isScaleContent()? Scaling.SCALE_TO_FIT:Scaling.ACTUAL_SIZE);
+        RenderingHints hints = new RenderingHints(buildRenderingHints(pxlOpts.getDithering(), pxlOpts.getInterpolation()));
 
         BookBundle bundle = new BookBundle();
 
@@ -127,7 +129,7 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
 
                 if (pxlOpts.getOrientation() == null) {
                     PDRectangle bounds = pd.getBBox();
-                    if (bounds.getWidth() > bounds.getHeight() || (pd.getRotation() / 90) % 2 == 1) {
+                    if ((page.getImageableHeight() > page.getImageableWidth() && bounds.getWidth() > bounds.getHeight()) || (pd.getRotation() / 90) % 2 == 1) {
                         log.info("Adjusting orientation to print landscape PDF source");
                         page.setOrientation(PrintOptions.Orientation.LANDSCAPE.getAsFormat());
                     }
@@ -144,7 +146,7 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                 }
             }
 
-            bundle.append(new PDFWrapper(doc, scale, false, (float)(pxlOpts.getDensity() * pxlOpts.getUnits().as1Inch()), false, pxlOpts.getOrientation()), page, doc.getNumberOfPages());
+            bundle.append(new PDFWrapper(doc, scale, false, (float)(pxlOpts.getDensity() * pxlOpts.getUnits().as1Inch()), false, pxlOpts.getOrientation(), hints), page, doc.getNumberOfPages());
         }
 
         job.setJobName(pxlOpts.getJobName(Constants.PDF_PRINT));

@@ -32,7 +32,7 @@ public class PrintOptions {
     /**
      * Parses the provided JSON Object into relevant Pixel and Raw options
      */
-    public PrintOptions(JSONObject configOpts, PrintOutput output) {
+    public PrintOptions(JSONObject configOpts, PrintOutput output, PrintingUtilities.Type type) {
         if (configOpts == null) { return; }
 
         //check for raw options
@@ -109,6 +109,16 @@ public class PrintOptions {
                 try { psOptions.density = configOpts.getDouble("density"); }
                 catch(JSONException e) { warn("double", "density", configOpts.opt("density")); }
             }
+        }
+        if (!configOpts.isNull("dithering")) {
+            try {
+                if (configOpts.getBoolean("dithering")) {
+                    psOptions.dithering = RenderingHints.VALUE_DITHER_ENABLE;
+                } else {
+                    psOptions.dithering = RenderingHints.VALUE_DITHER_DISABLE;
+                }
+            }
+            catch(JSONException e) { warn("boolean", "dithering", configOpts.opt("dithering")); }
         }
         if (!configOpts.isNull("duplex")) {
             try { psOptions.duplex = configOpts.getBoolean("duplex"); }
@@ -231,7 +241,7 @@ public class PrintOptions {
                 defOptions.density = 60000d / psOptions.getUnits().getDPIUnits();
             }
         }
-        if (psOptions.isRasterize() && psOptions.getDensity() == 0) {
+        if ((psOptions.isRasterize() || type == PrintingUtilities.Type.IMAGE) && psOptions.getDensity() == 0) {
             psOptions.density = defOptions.density;
         }
 
@@ -318,6 +328,7 @@ public class PrintOptions {
         private ColorType colorType = ColorType.COLOR;                              //Color / black&white
         private int copies = 1;                                                     //Job copies
         private double density = 0;                                                 //Pixel density (DPI or DPMM)
+        private Object dithering = RenderingHints.VALUE_DITHER_DEFAULT;             //Image dithering
         private boolean duplex = false;                                             //Double/single sided
         private Object interpolation = RenderingHints.VALUE_INTERPOLATION_BICUBIC;  //Image interpolation
         private String jobName = null;                                              //Job name
@@ -343,6 +354,10 @@ public class PrintOptions {
 
         public double getDensity() {
             return density;
+        }
+
+        public Object getDithering() {
+            return dithering;
         }
 
         public boolean isDuplex() {

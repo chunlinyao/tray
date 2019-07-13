@@ -779,7 +779,7 @@
     /// Authentication setup ///
     qz.security.setCertificatePromise(function(resolve, reject) {
         //Preferred method - from server
-//        $.ajax("assets/signing/digital-certificate.txt").then(resolve, reject);
+//        $.ajax({ url: "assets/signing/digital-certificate.txt", cache: false, dataType: "text" }).then(resolve, reject);
 
         //Alternate method 1 - anonymous
 //        resolve();
@@ -1951,7 +1951,7 @@
                             colorType: $("#pxlColorType").val(),
                             copies: copies,
                             density: $("#pxlDensity").val(),
-                            duplex: $("#pxlDuplex").prop('checked'),
+		            duplex: $("#pxlDuplex").prop('checked'),
                             interpolation: $("#pxlInterpolation").val(),
                             jobName: jobName,
                             legacy: $("#pxlLegacy").prop('checked'),
@@ -1981,7 +1981,7 @@
         var cf = getUpdatedConfig();
         cf.setPrinter(printer);
 
-        if (typeof printer === 'object' && printer.name == undefined) {
+        if (printer && typeof printer === 'object' && printer.name == undefined) {
             var shown;
             if (printer.file != undefined) {
                 shown = "<em>FILE:</em> " + printer.file;
@@ -1992,7 +1992,7 @@
 
             $("#configPrinter").html(shown);
         } else {
-            if (printer.name != undefined) {
+            if (printer && printer.name != undefined) {
                 printer = printer.name;
             }
 

@@ -3,6 +3,7 @@ package qz.ui;
 import org.eclipse.jetty.server.*;
 import qz.common.Constants;
 import qz.common.SecurityInfo;
+import qz.utils.SystemUtilities;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -56,7 +57,7 @@ public class AboutDialog extends BasicDialog {
 
         JScrollPane pane = new JScrollPane(gridPanel);
         pane.getVerticalScrollBar().setUnitIncrement(8);
-        pane.setPreferredSize(new Dimension(00, 100));
+        pane.setPreferredSize(new Dimension(0, (int)(100 * SystemUtilities.getWindowScaleFactor())));
         gridPanel.setLayout(new GridLayout(5, 2));
         gridPanel.setBorder(new EtchedBorder(EtchedBorder.LOWERED));
 
@@ -91,7 +92,12 @@ public class AboutDialog extends BasicDialog {
             if (i % 4 == 0 || i % 4 == 1) {
                 if (gridPanel.getComponent(i) instanceof JComponent) {
                     ((JComponent)gridPanel.getComponent(i)).setOpaque(true);
-                    gridPanel.getComponent(i).setBackground(gridPanel.getComponent(i).getBackground().brighter());
+                    if(SystemUtilities.isDarkMode()) {
+                        gridPanel.getComponent(i).setBackground(gridPanel.getComponent(i).getBackground().darker());
+                    }
+                    else {
+                        gridPanel.getComponent(i).setBackground(gridPanel.getComponent(i).getBackground().brighter());
+                    }
                 }
             }
             ((JComponent)gridPanel.getComponent(i)).setBorder(new EmptyBorder(0, Constants.BORDER_PADDING, 0, Constants.BORDER_PADDING));

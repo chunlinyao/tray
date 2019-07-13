@@ -12,8 +12,9 @@ public class Constants {
     public static final String HEXES = "0123456789ABCDEF";
     public static final char[] HEXES_ARRAY = HEXES.toCharArray();
     public static final int BYTE_BUFFER_SIZE = 8192;
-    public static final Version VERSION = Version.valueOf("2.0.6");
+    public static final Version VERSION = Version.valueOf("2.0.10");
     public static final Version JAVA_VERSION = SystemUtilities.getJavaVersion();
+    public static final String JAVA_VENDOR = System.getProperty("java.vendor");
 
     /* QZ-Tray Constants */
     public static final String BLOCK_FILE = "blocked";
@@ -49,8 +50,10 @@ public class Constants {
 
     public static final long VALID_SIGNING_PERIOD = 15 * 60 * 1000; //millis
     public static final int EXPIRY_WARN = 30;   // days
-    public static final Color WARNING_COLOR = Color.RED;
-    public static final Color TRUSTED_COLOR = Color.BLUE;
+    public static Color WARNING_COLOR = Color.RED;
+    public static Color TRUSTED_COLOR = Color.BLUE;
+    public static Color WARNING_COLOR_LIGHTER = Color.decode("#EB6261");
+    public static Color TRUSTED_COLOR_LIGHTER = Color.decode("#589DF6");
 
     public static final long MEMORY_PER_PRINT = 512; //MB
 

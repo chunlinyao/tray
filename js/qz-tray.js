@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * @version 2.0.6;
+ * @version 2.0.10;
  * @overview QZ Tray Connector
  * <p/>
  * Connects a web client to the QZ Tray software.
@@ -28,7 +28,7 @@ var qz = (function() {
 ///// PRIVATE METHODS /////
 
     var _qz = {
-        VERSION: "2.0.6",                              //must match @version above
+        VERSION: "2.0.10",                              //must match @version above
         DEBUG: false,
 
         log: {
@@ -130,27 +130,29 @@ var qz = (function() {
 
                         //called on successful connection to qz, begins setup of websocket calls and resolves connect promise after certificate is sent
                         _qz.websocket.connection.onopen = function(evt) {
-                            _qz.log.trace(evt);
-                            _qz.log.info("Established connection with QZ Tray on " + address);
+                            if (!_qz.websocket.connection.established) {
+                                _qz.log.trace(evt);
+                                _qz.log.info("Established connection with QZ Tray on " + address);
 
-                            _qz.websocket.setup.openConnection({ resolve: resolve, reject: reject });
+                                _qz.websocket.setup.openConnection({ resolve: resolve, reject: reject });
 
-                            if (config.keepAlive > 0) {
-                                var interval = setInterval(function() {
-                                    if (!qz.websocket.isActive()) {
-                                        clearInterval(interval);
-                                        return;
-                                    }
+                                if (config.keepAlive > 0) {
+                                    var interval = setInterval(function() {
+                                        if (!qz.websocket.isActive()) {
+                                            clearInterval(interval);
+                                            return;
+                                        }
 
-                                    _qz.websocket.connection.send("ping");
-                                }, config.keepAlive * 1000);
+                                        _qz.websocket.connection.send("ping");
+                                    }, config.keepAlive * 1000);
+                                }
                             }
                         };
 
                         //called during websocket close during setup
                         _qz.websocket.connection.onclose = function() {
                             // Safari compatibility fix to raise error event
-                            if (typeof navigator !== 'undefined' && navigator.userAgent.indexOf('Safari') != -1 && navigator.userAgent.indexOf('Chrome') == -1) {
+                            if (_qz.websocket.connection && typeof navigator !== 'undefined' && navigator.userAgent.indexOf('Safari') != -1 && navigator.userAgent.indexOf('Chrome') == -1) {
                                 _qz.websocket.connection.onerror();
                             }
                         };
@@ -686,11 +688,16 @@ var qz = (function() {
                     }
 
                     var attempt = function(count) {
+                        var tried = false;
                         var nextAttempt = function() {
-                            if (options && count < options.retries) {
-                                attempt(count + 1);
-                            } else {
-                                reject.apply(null, arguments);
+                            if (!tried) {
+                                tried = true;
+
+                                if (options && count < options.retries) {
+                                    attempt(count + 1);
+                                } else {
+                                    reject.apply(null, arguments);
+                                }
                             }
                         };
 
@@ -754,16 +761,18 @@ var qz = (function() {
             /**
              * @param {string} [hostname] Hostname to try to connect to when determining network interfaces, defaults to "google.com"
              * @param {number} [port] Port to use with custom hostname, defaults to 443
+             * @param {string} [signature] Pre-signed signature of hashed JSON string containing <code>call='websocket.getNetworkInfo'</code>, <code>params</code> object, and <code>timestamp</code>.
+             * @param {number} [signingTimestamp] Required with <code>signature</code>. Timestamp used with pre-signed content.
              *
              * @returns {Promise<Object<{ipAddress: String, macAddress: String}>|Error>} Connected system's network information.
              *
              * @memberof qz.websocket
              */
-            getNetworkInfo: function(hostname, port) {
+            getNetworkInfo: function(hostname, port, signature, signingTimestamp) {
                 return _qz.websocket.dataPromise('websocket.getNetworkInfo', {
                     hostname: hostname,
                     port: port
-                });
+                }, signature, signingTimestamp);
             },
 
             /**
@@ -789,24 +798,29 @@ var qz = (function() {
          */
         printers: {
             /**
+             * @param {string} [signature] Pre-signed signature of hashed JSON string containing <code>call='printers.getDefault</code>, <code>params</code>, and <code>timestamp</code>.
+             * @param {number} [signingTimestamp] Required with <code>signature</code>. Timestamp used with pre-signed content.
+             *
              * @returns {Promise<string|Error>} Name of the connected system's default printer.
              *
              * @memberof qz.printers
              */
-            getDefault: function() {
-                return _qz.websocket.dataPromise('printers.getDefault');
+            getDefault: function(signature, signingTimestamp) {
+                return _qz.websocket.dataPromise('printers.getDefault', null, signature, signingTimestamp);
             },
 
             /**
              * @param {string} [query] Search for a specific printer. All printers are returned if not provided.
+             * @param {string} [signature] Pre-signed signature of hashed JSON string containing <code>call='printers.find'</code>, <code>params</code>, and <code>timestamp</code>.
+             * @param {number} [signingTimestamp] Required with <code>signature</code>. Timestamp used with pre-signed content.
              *
              * @returns {Promise<Array<string>|string|Error>} The matched printer name if <code>query</code> is provided.
              *                                                Otherwise an array of printer names found on the connected system.
              *
              * @memberof qz.printers
              */
-            find: function(query) {
-                return _qz.websocket.dataPromise('printers.find', { query: query });
+            find: function(query, signature, signingTimestamp) {
+                return _qz.websocket.dataPromise('printers.find', { query: query }, signature, signingTimestamp);
             }
         },
 
@@ -910,7 +924,7 @@ var qz = (function() {
          *   @param {string} [data.options.xmlTag] Required with <code>[xml]</code> format. Tag name containing base64 formatted data.
          *   @param {number} [data.options.pageWidth] Optional with <code>[html]</code> type printing. Width of the web page to render. Defaults to paper width.
          *   @param {number} [data.options.pageHeight] Optional with <code>[html]</code> type printing. Height of the web page to render. Defaults to adjusted web page height.
-         * @param {boolean} [signature] Pre-signed signature of JSON string containing <code>call</code>, <code>params</code>, and <code>timestamp</code>.
+         * @param {string} [signature] Pre-signed signature of hashed JSON string containing <code>call='print'</code>, <code>params</code>, and <code>timestamp</code>.
          * @param {number} [signingTimestamp] Required with <code>signature</code>. Timestamp used with pre-signed content.
          *
          * @returns {Promise<null|Error>}

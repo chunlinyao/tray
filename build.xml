@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <project name="qz" default="distribute" basedir=".">
+    <property file="ant/project.properties"/>
+    <import file="ant/javafx.xml"/>
 
-    <target name="distribute" depends="init,clean,sign-jar,override-authcert,include-assets">
+    <target name="distribute" depends="init,clean,sign-jar,download-javafx,override-authcert,include-assets">
         <echo message="Process complete" />
     </target>
 
     <target name="init">
         <property environment="env"/>
-        <property file="ant/project.properties"/>
 
         <!-- Your custom code signing properties here. Feel free to change. -->
         <!-- The project will default to qz.ks if it doesn't exist -->
@@ -17,6 +18,25 @@
         <!-- The default code signing properties which uses qz.ks. -->
         <!-- Please leave this value the netbeans default as a fallback. -->
         <property file="ant/private/private.properties"/>
+
+        <condition property="codesign.windows" value="true">
+            <and>
+                <isset property="target.platform.windows"/>
+                <isset property="signing.tsaurl"/>
+            </and>
+        </condition>
+        <condition property="codesign.linux" value="true">
+            <and>
+                <isset property="target.platform.linux"/>
+                <isset property="signing.tsaurl"/>
+            </and>
+        </condition>
+        <condition property="codesign.mac" value="true">
+            <and>
+                <isset property="target.platform.mac"/>
+                <isset property="signing.tsaurl"/>
+            </and>
+        </condition>
 
         <echo message="Building ${project.filename} using JDK ${ant.java.version}" />
     </target>
@@ -65,9 +85,15 @@
 
     <target name="build-jar" depends="compile-socket">
         <echo>Building Jar for Socket use</echo>
+        <mkdir dir="${sign.lib.dir}"/>
         <jar compress="${jar.compress}" index="${jar.index}" destfile="${dist.jar}" duplicate="preserve">
             <fileset dir="${build.project.dir}"/>
-            <zipgroupfileset dir="${lib.dir}" includes="**/*.jar" excludes="**/jfxrt.jar"/>
+            <zipgroupfileset dir="${sign.lib.dir}" includes="**/*.jar" erroronmissingdir="false"/>
+            <zipgroupfileset dir="${lib.dir}">
+                <include name="**/*.jar"/>
+                <exclude name="**/jfxrt.jar"/>
+                <exclude name="**/jssc-*.jar" if="codesign.mac"/>
+            </zipgroupfileset>
             <manifest>
                 <attribute name="Application-Name" value="${manifest.application.name}"/>
                 <attribute name="Main-Class" value="${manifest.main.class}"/>
@@ -77,7 +103,7 @@
     </target>
 
 
-    <target name="sign-jar" depends="build-jar,sign-jar-self,sign-jar-tsa">
+    <target name="sign-jar" depends="codesign,build-jar,sign-jar-self,sign-jar-tsa">
         <path>
             <fileset dir="${dist.dir}" includes="**/*.jar" />
         </path>
@@ -113,7 +139,7 @@
         <java jar="${dist.jar}" fork="true" outputproperty="build.version">
             <arg value="--version"/>
         </java>
-		
+
         <!-- Fallback to a bogus version number if the above command failed -->
         <property name="build.version" value="0.0.0" />
         <echo>Version ${build.version}</echo>
@@ -170,12 +196,18 @@
         </copy>
     </target>
 
+    <target name="distill-icu" depends="init">
+        <exec executable="python">
+            <arg line="ant/lib/slim-icu.py ${lib.dir}/charsets"/>
+        </exec>
+    </target>
+
     <!--
     ################################################################
     #               Prepackage Steps - All Platforms               #
     ################################################################
     -->
-    <target name="prepackage">
+    <target name="prepackage" depends="cleanup-javafx-dist">
         <echo>Processing self-signing variables</echo>
         <property file="ant/ssl.properties"/>
 
@@ -194,9 +226,13 @@
     #                    Windows Installer                         #
     ################################################################
     -->
-    <target name="nsis" depends="build-exe,sign-exe-self,sign-exe-tsa"/>
+    <!-- Inform javafx.xml  -->
+    <target name="nsis-preflight">
+        <property name="target.platform.windows" value="true"/>
+    </target>
+    <target name="nsis" depends="nsis-preflight,build-exe,sign-exe-self,sign-exe-tsa"/>
 
-    <target name="build-exe" depends="distribute,prepackage,nsisbin-1,nsisbin-2,nsisbin-3">
+    <target name="build-exe" depends="distribute,prepackage,cleanup-javafx-dist,nsisbin-1,nsisbin-2,nsisbin-3">
         <echo>Creating installer using ${nsisbin}</echo>
 
         <property file="ant/windows/windows.properties"/>
@@ -215,6 +251,7 @@
         <copy file="${windows.keygen.in}" tofile="${windows.keygen.out}" >
             <filterchain><expandproperties/></filterchain>
         </copy>
+        <copy file="${windows.jsonparser.in}" tofile="${windows.jsonparser.out}" />
 
         <exec executable="${nsisbin}" failonerror="true" >
             <arg value="${windows.launcher.out}"/>
@@ -278,7 +315,11 @@
     #                     Apple Installer                          #
     ################################################################
     -->
-    <target name="pkgbuild" depends="distribute,prepackage">
+    <!-- Inform javafx.xml  -->
+    <target name="pkgbuild-preflight">
+        <property name="target.platform.mac" value="true"/>
+    </target>
+    <target name="pkgbuild" depends="pkgbuild-preflight,distribute,prepackage">
         <echo>Creating installer using pkgbuild</echo>
 
         <property file="ant/apple/apple.properties"/>
@@ -341,6 +382,9 @@
         </copy>
         <chmod perm="u+x" file="${locator.out}"/>
 
+        <copy file="${jsonwriter.in}" tofile="${jsonwriter.out}" />
+        <chmod perm="u+x" file="${jsonwriter.out}"/>
+
         <exec executable="${apple.packager.out}" failonerror="true" />
 
         <!-- Cleanup lingering resources for other installer targets -->
@@ -349,12 +393,93 @@
         <delete file="${dist.dir}/${apple.plist.out}" />
     </target>
 
+    <target name="codesign" depends="init,download-javafx,prepackage" if="codesign.mac">
+        <property file="ant/apple/apple.properties"/>
+        <exec executable="security">
+            <arg value="add-certificates"/>
+            <arg value="${apple.packager.cert}"/>
+            <arg value="${apple.intermediate.cert}"/>
+            <arg value="${apple.codesign.cert}"/>
+        </exec>
+        <antcall target="codesign-libs">
+            <param name="signing.jarname" value="communication/jna-*.jar"/>
+            <param name="signing.excluded" value="communication/jna-platform-*.jar"/>
+            <param name="signing.filetype" value="*.jnilib"/>
+        </antcall>
+        <antcall target="codesign-libs">
+            <param name="signing.jarname" value="communication/jssc-*.jar"/>
+            <param name="signing.filetype" value="*.dylib"/>
+        </antcall>
+        <antcall target="codesign-libs">
+            <param name="signing.jarname" value="communication/hid4java-*.jar"/>
+            <param name="signing.filetype" value="*.dylib"/>
+        </antcall>
+        <antcall target="codesign-libs">
+            <param name="signing.jarname" value="communication/libusb4java-*-osx-x86.jar"/>
+            <param name="signing.filetype" value="*.dylib"/>
+        </antcall>
+        <antcall target="codesign-libs">
+            <param name="signing.jarname" value="communication/libusb4java-*-osx-x86_64.jar"/>
+            <param name="signing.filetype" value="*.dylib"/>
+        </antcall>
+        <!-- Manually sign standalone libs -->
+        <!--use xargs to loop over and codesign all files-->
+        <echo message="Signing ${dist.dir}/libs/*.dylib using ${apple.packager.signid}"/>
+        <exec executable="bash" failonerror="true">
+            <arg value="-c"/>
+            <arg value="echo &quot;$(find ${dist.dir}/libs/*.dylib)&quot; |tr ':' '\n' |xargs codesign -s &quot;${apple.packager.signid}&quot; -v"/>
+        </exec>
+
+    </target>
+
+    <target name="codesign-libs">
+        <path id="find.jar">
+            <fileset dir="${lib.dir}">
+                <include name="**/${signing.jarname}"/>
+                <exclude name="**/${signing.excluded}" if="signing.excluded"/>
+            </fileset>
+        </path>
+
+        <unzip src="${toString:find.jar}" dest="${out.dir}/jar-signing"/>
+        <path id="find.file">
+            <fileset dir="${out.dir}/jar-signing">
+                <include name="**/${signing.filetype}"/>
+            </fileset>
+        </path>
+
+        <delete verbose="true">
+            <fileset dir="${out.dir}/jar-signing">
+                <include name="**/${signing.delete}" if="signing.delete"/>
+            </fileset>
+        </delete>
+
+        <!--use xargs to loop over and codesign all files-->
+        <echo message="Signing ${toString:find.jar} using ${apple.packager.signid}"/>
+        <exec executable="bash" failonerror="true">
+            <arg value="-c"/>
+            <arg value="echo &quot;${toString:find.file}&quot; |tr ':' '\n' |xargs codesign -s &quot;${apple.packager.signid}&quot; -v"/>
+        </exec>
+
+        <pathconvert property="find.jar.rel">
+            <path refid="find.jar"/>
+            <globmapper from="${basedir}/*" to="*" handledirsep="true" />
+        </pathconvert>
+        <zip destfile="${sign.lib.dir}/${find.jar.rel}" basedir="${out.dir}/jar-signing" excludes="dont*.*"/>
+
+        <!--cleanup temp folder-->
+        <delete dir="${out.dir}/jar-signing"/>
+    </target>
+
     <!--
     ################################################################
     #                     Linux Installer                          #
     ################################################################
     -->
-    <target name="makeself" depends="distribute,prepackage">
+    <!-- Inform javafx.xml  -->
+    <target name="makeself-preflight">
+        <property name="target.platform.linux" value="true"/>
+    </target>
+    <target name="makeself" depends="makeself-preflight,distribute,prepackage">
         <echo>Creating installer using makeself</echo>
 
         <property file="ant/linux/linux.properties"/>
@@ -396,6 +521,9 @@
             <filterchain><expandproperties/></filterchain>
         </copy>
         <chmod perm="u+x" file="${locator.out}"/>
+
+        <copy file="${jsonwriter.in}" tofile="${jsonwriter.out}" />
+        <chmod perm="u+x" file="${jsonwriter.out}"/>
 
         <exec executable="${linux.packager.out}" failonerror="true" />
 
