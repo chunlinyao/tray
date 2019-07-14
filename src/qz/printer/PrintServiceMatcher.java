@@ -27,7 +27,7 @@ public class PrintServiceMatcher {
 
     public static PrintService[] getPrintServices() {
         //Update printer list in CUPS immediately
-        AppContext.getAppContext().put(PrintServiceLookup.class.getDeclaredClasses()[0], null);
+        //AppContext.getAppContext().put(PrintServiceLookup.class.getDeclaredClasses()[0], null);
 
         PrintService[] printers = PrintServiceLookup.lookupPrintServices(null, null);
         log.debug("Found {} printers", printers.length);
