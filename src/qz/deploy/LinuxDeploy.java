@@ -10,97 +10,60 @@
 
 package qz.deploy;
 
+import java.awt.Toolkit;
+import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.Constants;
-import qz.utils.ShellUtilities;
-
-import java.io.File;
-import java.io.UnsupportedEncodingException;
-import java.net.URLDecoder;
+import qz.utils.*;
 
 /**
  * @author Tres Finocchiaro
  */
-public class LinuxDeploy extends DeployUtilities {
+class LinuxDeploy extends DeployUtilities {
 
     private static final Logger log = LoggerFactory.getLogger(LinuxDeploy.class);
 
+    private static String STARTUP = "/etc/xdg/autostart/";
+    private static String DESKTOP = System.getProperty("user.home") + "/Desktop/";
+
+    private String appLauncher = "/usr/share/applications/" + getShortcutName();
+
     @Override
-    public boolean createStartupShortcut() {
-        ShellUtilities.execute(new String[] {
-                "mkdir", "-p", System.getProperty("user.home") + "/.config/autostart/"
-        });
-        return createShortcut(System.getProperty("user.home") + "/.config/autostart/");
+    public boolean canAutoStart() {
+        return Files.exists(Paths.get(STARTUP, getShortcutName()));
     }
 
     @Override
     public boolean createDesktopShortcut() {
-        return createShortcut(System.getProperty("user.home") + "/Desktop/");
+        return copyShortcut(appLauncher, DESKTOP);
     }
 
-    @Override
-    public boolean removeStartupShortcut() {
-        return deleteFile(System.getProperty("user.home") + "/.config/autostart/" + getShortcutName());
-    }
-
-    @Override
-    public boolean removeDesktopShortcut() {
-        return deleteFile(System.getProperty("user.home") + "/Desktop/" + getShortcutName());
-    }
-
-
-    @Override
-    public boolean hasStartupShortcut() {
-        String target = System.getProperty("user.home") + "/.config/autostart/";
-        upgradeLegacyShortcut(target);
-        return fileExists(target + getShortcutName());
-    }
-
-    @Override
-    public boolean hasDesktopShortcut() {
-        String target = System.getProperty("user.home") + "/Desktop/";
-        upgradeLegacyShortcut(target);
-        return fileExists(target + getShortcutName());
-    }
-
-    /**
-     * Creates a Linux ".desktop" shortcut
-     *
-     * @param target target location of shortcut
-     * @return Whether or not the shortcut was created successfully
-     */
-    public boolean createShortcut(String target) {
+    private static boolean copyShortcut(String source, String target) {
        return ShellUtilities.execute(new String[] {
-               "cp", getAppPath(), target
+               "cp", source, target
        });
+    }
+
+    @Override
+    public void setShortcutName(String name) {
+        super.setShortcutName(name);
+        // Fix window titles on Gnome 3 per JDK-6528430
+        try {
+            Toolkit t = Toolkit.getDefaultToolkit();
+            Field f = t.getClass().getDeclaredField("awtAppClassName");
+            f.setAccessible(true);
+            f.set(t, name);
+        }
+        catch (Exception ignore) {}
     }
 
     @Override
     public String getShortcutName() {
         return Constants.PROPS_FILE + ".desktop";
-    }
-
-    /**
-     * Returns the path to the jar executable or desktop launcher
-     * @return
-     */
-    public String getAppPath() {
-        return "/usr/share/applications/" + getShortcutName();
-    }
-
-    /**
-     * Upgrade 1.9 shortcut to new 2.0 format
-     * @return
-     */
-    private boolean upgradeLegacyShortcut(String target) {
-        String shortcut = target + Constants.ABOUT_TITLE + ".desktop";
-        if (fileExists(shortcut)) {
-            if (ShellUtilities.execute(new String[] { "rm", shortcut })) {
-                return createShortcut(target);
-            }
-        }
-        return false;
     }
 }
 

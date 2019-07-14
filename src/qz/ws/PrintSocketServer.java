@@ -10,6 +10,7 @@
 
 package qz.ws;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.PatternLayout;
 import org.apache.log4j.rolling.FixedWindowRollingPolicy;
@@ -28,10 +29,12 @@ import org.eclipse.jetty.websocket.servlet.ServletUpgradeResponse;
 import org.eclipse.jetty.websocket.servlet.WebSocketCreator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qz.auth.Certificate;
 import qz.common.Constants;
 import qz.common.SecurityInfo;
 import qz.common.TrayManager;
 import qz.deploy.DeployUtilities;
+import qz.utils.FileUtilities;
 import qz.utils.SystemUtilities;
 
 import javax.swing.*;
@@ -50,8 +53,8 @@ public class PrintSocketServer {
     private static final Logger log = LoggerFactory.getLogger(PrintSocketServer.class);
 
     private static final int MAX_MESSAGE_SIZE = Integer.MAX_VALUE;
-    public static final List<Integer> SECURE_PORTS = Collections.unmodifiableList(Arrays.asList(8181, 8282, 8383, 8484));
-    public static final List<Integer> INSECURE_PORTS = Collections.unmodifiableList(Arrays.asList(8182, 8283, 8384, 8485));
+    public static final List<Integer> SECURE_PORTS = Collections.unmodifiableList(Arrays.asList(Constants.WSS_PORTS));
+    public static final List<Integer> INSECURE_PORTS = Collections.unmodifiableList(Arrays.asList(Constants.WS_PORTS));
 
     private static final AtomicInteger securePortIndex = new AtomicInteger(0);
     private static final AtomicInteger insecurePortIndex = new AtomicInteger(0);
@@ -60,28 +63,42 @@ public class PrintSocketServer {
     private static Properties trayProperties;
     private static SerialProxyServer serialProxy;
 
+    private static boolean headless;
+
 
     public static void main(String[] args) {
-        for(String s : args) {
-            // Print version information and exit
-            if ("-v".equals(s) || "--version".equals(s)) {
-                System.out.println(Constants.VERSION);
-                System.exit(0);
-            }
-            // Print library list and exits
-            if ("-l".equals(s) || "--libinfo".equals(s)) {
-                String format = "%-40s%s%n";
-                System.out.printf(format, "LIBRARY NAME:", "VERSION:");
-                SortedMap<String, String> libVersions = SecurityInfo.getLibVersions();
-                for (Map.Entry<String, String> entry: libVersions.entrySet()) {
-                    if (entry.getValue() == null) {
-                        System.out.printf(format, entry.getKey(), "(unknown)");
-                    } else {
-                        System.out.printf(format, entry.getKey(), entry.getValue());
-                    }
+        List<String> sArgs = Arrays.asList(args);
+
+        if (sArgs.contains("-a") || sArgs.contains("--whitelist")) {
+            int fileIndex = Math.max(sArgs.indexOf("-a"), sArgs.indexOf("--whitelist")) + 1;
+            addToList(Constants.ALLOW_FILE, new File(sArgs.get(fileIndex)));
+            System.exit(0);
+        }
+        if (sArgs.contains("-b") || sArgs.contains("--blacklist")) {
+            int fileIndex = Math.max(sArgs.indexOf("-b"), sArgs.indexOf("--blacklist")) + 1;
+            addToList(Constants.BLOCK_FILE, new File(sArgs.get(fileIndex)));
+            System.exit(0);
+        }
+        // Print library list and exits
+        if (sArgs.contains("-l") || sArgs.contains("--libinfo")) {
+            String format = "%-40s%s%n";
+            System.out.printf(format, "LIBRARY NAME:", "VERSION:");
+            SortedMap<String, String> libVersions = SecurityInfo.getLibVersions();
+            for (Map.Entry<String, String> entry: libVersions.entrySet()) {
+                if (entry.getValue() == null) {
+                    System.out.printf(format, entry.getKey(), "(unknown)");
+                } else {
+                    System.out.printf(format, entry.getKey(), entry.getValue());
                 }
-                System.exit(0);
             }
+            System.exit(0);
+        }
+        if (sArgs.contains("-h") || sArgs.contains("--headless")) {
+            headless = true;
+        }
+        if (sArgs.contains("-v") || sArgs.contains("--version")) {
+            System.out.println(Constants.VERSION);
+            System.exit(0);
         }
 
         log.info(Constants.ABOUT_TITLE + " version: {}", Constants.VERSION);
@@ -91,13 +108,8 @@ public class PrintSocketServer {
         setupFileLogging();
 
         try {
-            SwingUtilities.invokeAndWait(new Runnable() {
-                @Override
-                public void run() {
-                    trayManager = new TrayManager();
-                }
-            });
-            runSerialProxy();
+            log.info("Starting {} {}", Constants.ABOUT_TITLE, Constants.VERSION);
+            SwingUtilities.invokeAndWait(() -> trayManager = new TrayManager(headless));
             runServer();
             stopSerialProxy();
         }
@@ -108,7 +120,23 @@ public class PrintSocketServer {
         log.warn("The web socket server is no longer running");
     }
 
-    public static void setupFileLogging() {
+    private static void addToList(String list, File certFile) {
+        try {
+            FileReader fr = new FileReader(certFile);
+            Certificate cert = new Certificate(IOUtils.toString(fr));
+
+            if (FileUtilities.printLineToFile(list, cert.data())) {
+                log.info("Successfully added {} to {} list", cert.getOrganization(), list);
+            } else {
+                log.warn("Failed to add certificate to {} list (Insufficient user privileges)", list);
+            }
+        }
+        catch(Exception e) {
+            log.error("Failed to add certificate:", e);
+        }
+    }
+
+    private static void setupFileLogging() {
         FixedWindowRollingPolicy rollingPolicy = new FixedWindowRollingPolicy();
         rollingPolicy.setFileNamePattern(SystemUtilities.getDataDirectory() + File.separator + Constants.LOG_FILE + ".log.%i");
         rollingPolicy.setMaxIndex(Constants.LOG_ROTATIONS);

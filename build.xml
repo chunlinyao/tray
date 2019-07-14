@@ -253,6 +253,8 @@
         </copy>
         <copy file="${windows.jsonparser.in}" tofile="${windows.jsonparser.out}" />
 
+        <copy file="${windows.cleanup.in}" tofile="${windows.cleanup.out}" />
+
         <exec executable="${nsisbin}" failonerror="true" >
             <arg value="${windows.launcher.out}"/>
         </exec>
@@ -486,6 +488,10 @@
         <copy file="${branding.dir}/${linux.icon}" tofile="${dist.dir}/${linux.icon}" />
 
         <copy file="${linux.installer.in}" tofile="${linux.installer.out}" >
+            <filterchain><expandproperties/></filterchain>
+        </copy>
+
+        <copy file="${linux.launcher.in}" tofile="${linux.launcher.out}" >
             <filterchain><expandproperties/></filterchain>
         </copy>
 

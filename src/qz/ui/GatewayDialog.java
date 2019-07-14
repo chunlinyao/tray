@@ -69,29 +69,21 @@ public class GatewayDialog extends JDialog {
         certInfoLabel = new LinkLabel();
         certTable = new CertificateTable(cert, iconCache);
         certScrollPane = new JScrollPane(certTable);
-        certInfoLabel.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                certTable.setCertificate(cert);
-                certTable.autoSize();
-                JOptionPane.showMessageDialog(
-                        GatewayDialog.this,
-                        certScrollPane,
-                        "Certificate",
-                        JOptionPane.PLAIN_MESSAGE);
-            }
+        certInfoLabel.addActionListener(e -> {
+            certTable.setCertificate(cert);
+            certTable.autoSize();
+            JOptionPane.showMessageDialog(
+                    GatewayDialog.this,
+                    certScrollPane,
+                    "Certificate",
+                    JOptionPane.PLAIN_MESSAGE);
         });
 
         bottomPanel = new JPanel();
         bottomPanel.setLayout(new FlowLayout(FlowLayout.RIGHT));
         persistentCheckBox = new JCheckBox("Remember this decision", false);
         persistentCheckBox.setMnemonic(KeyEvent.VK_R);
-        persistentCheckBox.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                allowButton.setEnabled(!persistentCheckBox.isSelected() || cert.isTrusted());
-            }
-        });
+        persistentCheckBox.addActionListener(e -> allowButton.setEnabled(!persistentCheckBox.isSelected() || cert.isTrusted()));
         persistentCheckBox.setAlignmentX(RIGHT_ALIGNMENT);
 
         bottomPanel.add(certInfoLabel);
@@ -152,7 +144,6 @@ public class GatewayDialog extends JDialog {
             verifiedLabel.setIcon(null);
         }
 
-        approved = false;
         persistentCheckBox.setSelected(false);
         allowButton.setEnabled(true);
         allowButton.requestFocusInWindow();
@@ -164,7 +155,7 @@ public class GatewayDialog extends JDialog {
     }
 
     public boolean isPersistent() {
-        return this.persistentCheckBox.isSelected();
+        return persistentCheckBox.isSelected();
     }
 
     public void setCertificate(Certificate cert) {
@@ -184,7 +175,18 @@ public class GatewayDialog extends JDialog {
     }
 
     public boolean prompt(String description, Certificate cert, Point position) {
-        persistentCheckBox.setSelected(false); // prevents re-adding a persistent site to the list it's already on
+        //reset dialog state on new prompt
+        approved = false;
+        persistentCheckBox.setSelected(false);
+
+        if (cert == null || cert.isBlocked()) {
+            approved = false;
+            return false;
+        }
+        if (cert.isTrusted() && cert.isSaved()) {
+            approved = true;
+            return true;
+        }
 
         setDescription(description);
         setCertificate(cert);

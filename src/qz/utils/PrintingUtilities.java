@@ -18,10 +18,7 @@ import javax.print.PrintService;
 import javax.print.attribute.ResolutionSyntax;
 import javax.print.attribute.standard.PrinterResolution;
 import java.awt.print.PrinterAbortException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 
 public class PrintingUtilities {
 
@@ -30,34 +27,41 @@ public class PrintingUtilities {
     private static HashMap<String,String> CUPS_DESC; //name -> description
     private static HashMap<String,PrinterResolution> CUPS_DPI; //description -> default dpi
 
-    private static GenericKeyedObjectPool<Type,PrintProcessor> processorPool;
+    private static GenericKeyedObjectPool<Format,PrintProcessor> processorPool;
 
 
     private PrintingUtilities() {}
 
     public enum Type {
-        HTML, IMAGE, PDF, RAW, DIRECT
+        PIXEL, RAW
     }
 
     public enum Format {
-        BASE64, FILE, IMAGE, PLAIN, HEX, XML, PDF
+        COMMAND, DIRECT, HTML, IMAGE, PDF, PDF2EPL
+    }
+
+    public enum Flavor {
+        BASE64, FILE, HEX, PLAIN, XML
     }
 
 
-    public static Type getPrintType(JSONArray printData) {
+    public static Format getPrintFormat(JSONArray printData) throws JSONException {
+        convertVersion(printData);
+
+        //grab first data object to determine type for entire set
         JSONObject data = printData.optJSONObject(0);
 
-        Type type;
+        Format format;
         if (data == null) {
-            type = Type.RAW;
+            format = Format.COMMAND;
         } else {
-            type = Type.valueOf(data.optString("type", "RAW").toUpperCase(Locale.ENGLISH));
+            format = Format.valueOf(data.optString("format", "COMMAND").toUpperCase(Locale.ENGLISH));
         }
 
-        return type;
+        return format;
     }
 
-    public synchronized static PrintProcessor getPrintProcessor(Type type) {
+    public synchronized static PrintProcessor getPrintProcessor(Format format) {
         try {
             if (processorPool == null) {
                 processorPool = new GenericKeyedObjectPool<>(new ProcessorFactory());
@@ -75,17 +79,51 @@ public class PrintingUtilities {
             }
 
             log.trace("Waiting for processor, {}/{} already in use", processorPool.getNumActive(), processorPool.getMaxTotal());
-            return processorPool.borrowObject(type);
+            return processorPool.borrowObject(format);
         }
         catch(Exception e) {
-            throw new IllegalArgumentException(String.format("Unable to find processor for %s type", type.name()));
+            throw new IllegalArgumentException(String.format("Unable to find processor for %s type", format.name()));
+        }
+    }
+
+    /**
+     * Version 2.1 introduced the flavor attribute to apply better control on raw data.
+     * Essentially format became flavor, type become format, and type was rewritten.
+     * Though a few exceptions exist due to the way additional raw options used to be handled.
+     * <p>
+     * This method will take the data object, and if it uses any old terminology it will update the value to the new set.
+     *
+     * @param dataArr JSONArray of printData, will update any data values by reference
+     */
+    private static void convertVersion(JSONArray dataArr) throws JSONException {
+        for(int i = 0; i < dataArr.length(); i++) {
+            JSONObject data = dataArr.optJSONObject(i);
+            if (data == null) { data = new JSONObject(); }
+
+            if (!data.isNull("flavor")) { return; } //flavor exists only in new version, no need to convert any data
+
+            if (!data.isNull("format")) {
+                String format = data.getString("format").toUpperCase();
+                if (Arrays.asList("BASE64", "FILE", "HEX", "PLAIN", "XML").contains(format)) {
+                    data.put("flavor", format);
+                    data.remove("format");
+                }
+            }
+
+            if (!data.isNull("type")) {
+                String type = data.getString("type").toUpperCase();
+                if (Arrays.asList("HTML", "IMAGE", "PDF").contains(type)) {
+                    data.put("type", "PIXEL");
+                    data.put("format", type);
+                }
+            }
         }
     }
 
     public static void releasePrintProcessor(PrintProcessor processor) {
         try {
             log.trace("Returning processor back to pool");
-            processorPool.returnObject(processor.getType(), processor);
+            processorPool.returnObject(processor.getFormat(), processor);
         }
         catch(Exception ignore) {}
     }
@@ -96,15 +134,13 @@ public class PrintingUtilities {
      * @return Id of the printer for use with CUPS commands
      */
     public static String getPrinterId(String printerName) {
-        if (CUPS_DESC == null || !CUPS_DESC.containsValue(printerName)) {
+        if (CUPS_DESC == null || !CUPS_DESC.containsKey(printerName)) {
             CUPS_DESC = ShellUtilities.getCupsPrinters();
         }
 
         if (SystemUtilities.isMac()) {
-            for(String name : CUPS_DESC.keySet()) {
-                if (CUPS_DESC.get(name).equals(printerName)) {
-                    return name;
-                }
+            if (CUPS_DESC.containsKey(printerName)) {
+                return CUPS_DESC.get(printerName);
             }
             log.warn("Could not locate printerId matching {}", printerName);
         }
@@ -143,6 +179,45 @@ public class PrintingUtilities {
         return densities;
     }
 
+    public static String getDriver(PrintService service) {
+        String driver;
+
+        if (SystemUtilities.isWindows()) {
+            String regName = service.getName().replaceAll("\\\\", ",");
+            String keyPath = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers\\" + regName;
+
+            driver = ShellUtilities.execute(new String[] {"reg", "query", keyPath, "/v", "Printer Driver"}, new String[] {"REG_SZ"});
+            if (!driver.isEmpty()) {
+                driver = driver.substring(driver.indexOf("REG_SZ") + 6).trim();
+            } else {
+                String serverName = regName.replaceAll(",,(.+),.+", "$1");
+
+                keyPath = "HKCU\\Printers\\Connections\\" + regName;
+                String guid = ShellUtilities.execute(new String[] {"reg", "query", keyPath, "/v", "GuidPrinter"}, new String[] {"REG_SZ"});
+                if (!guid.isEmpty()) {
+                    guid = guid.substring(guid.indexOf("REG_SZ") + 6).trim();
+
+                    keyPath = "HKLM\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Print\\Providers\\Client Side Rendering Print Provider\\Servers\\" + serverName + "\\Printers\\" + guid;
+                    driver = ShellUtilities.execute(new String[] {"reg", "query", keyPath, "/v", "Printer Driver"}, new String[] {"REG_SZ"});
+                    if (!driver.isEmpty()) {
+                        driver = driver.substring(driver.indexOf("REG_SZ") + 6).trim();
+                    }
+                }
+            }
+        } else {
+            driver = ShellUtilities.execute(new String[] {"lpstat", "-l", "-p", getPrinterId(service.getName())}, new String[] {"Interface:"});
+            if (!driver.isEmpty()) {
+                driver = ShellUtilities.execute(new String[] {"grep", "*PCFileName:", driver.substring(10).trim()}, new String[] {"*PCFileName:"});
+                if (!driver.isEmpty()) {
+                    return driver.substring(12).replace("\"", "").trim();
+                }
+            }
+            /// Assume CUPS, raw
+            return "TEXTONLY.ppd";
+        }
+
+        return driver;
+    }
 
     /**
      * Determine print variables and send data to printer
@@ -152,13 +227,13 @@ public class PrintingUtilities {
      * @param params  Params of call from web API
      */
     public static void processPrintRequest(Session session, String UID, JSONObject params) throws JSONException {
-        Type type = getPrintType(params.getJSONArray("data"));
-        PrintProcessor processor = PrintingUtilities.getPrintProcessor(type);
+        Format format = getPrintFormat(params.getJSONArray("data"));
+        PrintProcessor processor = PrintingUtilities.getPrintProcessor(format);
         log.debug("Using {} to print", processor.getClass().getName());
 
         try {
             PrintOutput output = new PrintOutput(params.optJSONObject("printer"));
-            PrintOptions options = new PrintOptions(params.optJSONObject("options"), output, type);
+            PrintOptions options = new PrintOptions(params.optJSONObject("options"), output, format);
 
             processor.parseData(params.getJSONArray("data"), options);
             processor.print(output, options);

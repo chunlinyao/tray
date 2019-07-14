@@ -16,14 +16,19 @@ import qz.common.Constants;
 import qz.common.TrayManager;
 import qz.communication.*;
 import qz.printer.PrintServiceMatcher;
+import qz.printer.status.StatusMonitor;
+import qz.printer.status.StatusSession;
 import qz.utils.*;
 
+import javax.management.ListenerNotFoundException;
 import javax.print.PrintServiceLookup;
 import javax.security.cert.CertificateParsingException;
 import javax.usb.util.UsbUtil;
 import java.awt.*;
 import java.io.IOException;
 import java.io.Reader;
+import java.nio.file.*;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.concurrent.Semaphore;
 
@@ -42,6 +47,10 @@ public class PrintSocketClient {
     private enum Method {
         PRINTERS_GET_DEFAULT("printers.getDefault", true, "access connected printers"),
         PRINTERS_FIND("printers.find", true, "access connected printers"),
+        PRINTERS_DETAIL("printers.detail", true, "access connected printers"),
+        PRINTERS_START_LISTENING("printers.startListening", true, "listen for printer status"),
+        PRINTERS_GET_STATUS("printers.getStatus", false),
+        PRINTERS_STOP_LISTENING("printers.stopListening", false),
         PRINT("print", true, "print to %s"),
 
         SERIAL_FIND_PORTS("serial.findPorts", true, "access serial ports"),
@@ -71,7 +80,16 @@ public class PrintSocketClient {
         HID_CLOSE_STREAM("hid.closeStream", false, "use a USB device"),
         HID_RELEASE_DEVICE("hid.releaseDevice", false, "release a USB device"),
 
-        WEBSOCKET_GET_NETWORK_INFO("websocket.getNetworkInfo", true),
+        FILE_LIST("file.list", true, "view the filesystem"),
+        FILE_START_LISTENING("file.startListening", true, "listen for filesystem events"),
+        FILE_STOP_LISTENING("file.stopListening", false),
+        FILE_READ("file.read", true, "read the content of a file"),
+        FILE_WRITE("file.write", true, "write to a file"),
+        FILE_REMOVE("file.remove", true, "delete a file"),
+
+        NETWORKING_DEVICE("networking.device", true),
+        NETWORKING_DEVICES("networking.devices", true),
+        NETWORKING_DEVICE_LEGACY("websocket.getNetworkInfo", true),
         GET_VERSION("getVersion", false),
 
         INVALID("", false);
@@ -214,6 +232,10 @@ public class PrintSocketClient {
             log.error("Bad JSON: {}", e.getMessage());
             sendError(session, UID, e);
         }
+        catch(InvalidPathException | FileSystemException e) {
+            log.error("FileIO exception occurred", e);
+            sendError(session, UID, String.format("FileIO exception occurred: %s: %s", e.getClass().getSimpleName(), e.getMessage()));
+        }
         catch(Exception e) {
             log.error("Problem processing message", e);
             sendError(session, UID, e);
@@ -233,7 +255,7 @@ public class PrintSocketClient {
      * @param session WebSocket session
      * @param json    JSON received from web API
      */
-    private void processMessage(Session session, JSONObject json, SocketConnection connection, Certificate shownCertificate) throws JSONException, SerialPortException, DeviceException {
+    private void processMessage(Session session, JSONObject json, SocketConnection connection, Certificate shownCertificate) throws JSONException, SerialPortException, DeviceException, IOException, ListenerNotFoundException {
         String UID = json.optString("uid");
         Method call = Method.findFromCall(json.optString("call"));
         JSONObject params = json.optJSONObject("params");
@@ -270,22 +292,51 @@ public class PrintSocketClient {
         //call appropriate methods
         switch(call) {
             case PRINTERS_GET_DEFAULT:
-                sendResult(session, UID, PrintServiceLookup.lookupDefaultPrintService() == null ? null :
+                sendResult(session, UID, PrintServiceLookup.lookupDefaultPrintService() == null? null:
                         PrintServiceLookup.lookupDefaultPrintService().getName());
                 break;
             case PRINTERS_FIND:
                 if (params.has("query")) {
-                    String name = PrintServiceMatcher.getPrinterJSON(params.getString("query"));
+                    String name = PrintServiceMatcher.findPrinterName(params.getString("query"));
                     if (name != null) {
                         sendResult(session, UID, name);
                     } else {
                         sendError(session, UID, "Specified printer could not be found.");
                     }
                 } else {
-                    sendResult(session, UID, PrintServiceMatcher.getPrintersJSON());
+                    JSONArray services = PrintServiceMatcher.getPrintersJSON();
+                    JSONArray names = new JSONArray();
+                    for(int i = 0; i < services.length(); i++) {
+                        names.put(services.getJSONObject(i).getString("name"));
+                    }
+
+                    sendResult(session, UID, names);
                 }
                 break;
-
+            case PRINTERS_DETAIL:
+                sendResult(session, UID, PrintServiceMatcher.getPrintersJSON());
+                break;
+            case PRINTERS_START_LISTENING:
+                if (!connection.hasStatusListener()) {
+                    connection.startStatusListener(new StatusSession(session));
+                }
+                StatusMonitor.startListening(connection, params.getJSONArray("printerNames"));
+                sendResult(session, UID, null);
+                break;
+            case PRINTERS_GET_STATUS:
+                if (connection.hasStatusListener()) {
+                    StatusMonitor.sendStatuses(connection);
+                } else {
+                    sendError(session, UID, "No printer listeners started for this client.");
+                }
+                sendResult(session, UID, null);
+                break;
+            case PRINTERS_STOP_LISTENING:
+                if (connection.hasStatusListener()) {
+                    connection.stopStatusListener();
+                }
+                sendResult(session, UID, null);
+                break;
             case PRINT:
                 PrintingUtilities.processPrintRequest(session, UID, params);
                 break;
@@ -297,14 +348,26 @@ public class PrintSocketClient {
                 SerialUtilities.setupSerialPort(session, UID, connection, params);
                 break;
             case SERIAL_SEND_DATA: {
-                SerialProperties props = null;
+                SerialOptions opts = null;
+                //properties param is deprecated legacy here and will be overridden by options if provided
                 if (!params.isNull("properties")) {
-                    props = new SerialProperties(params.optJSONObject("properties"));
+                    opts = new SerialOptions(params.optJSONObject("properties"), false);
+                }
+                if (!params.isNull("options")) {
+                    opts = new SerialOptions(params.optJSONObject("options"), false);
                 }
 
                 SerialIO serial = connection.getSerialPort(params.optString("port"));
                 if (serial != null) {
-                    serial.sendData(params.optString("data"), props);
+                    String serialData;
+                    JSONObject data = params.optJSONObject("data");
+                    if (data != null) {
+                        serialData = data.getString("data");
+                    } else {
+                        serialData = params.optString("data");
+                    }
+
+                    serial.sendData(serialData, opts, SerialUtilities.getDataTypeJSON(data));
                     sendResult(session, UID, null);
                 } else {
                     sendError(session, UID, String.format("Serial port [%s] must be opened first.", params.optString("port")));
@@ -340,11 +403,11 @@ public class PrintSocketClient {
                 }
                 break;
             case HID_START_LISTENING:
-                if (!connection.isListening()) {
+                if (!connection.isDeviceListening()) {
                     if (SystemUtilities.isWindows()) {
-                        connection.startListening(new PJHA_HidListener(session));
+                        connection.startDeviceListening(new PJHA_HidListener(session));
                     } else {
-                        connection.startListening(new H4J_HidListener(session));
+                        connection.startDeviceListening(new H4J_HidListener(session));
                     }
                     sendResult(session, UID, null);
                 } else {
@@ -352,8 +415,8 @@ public class PrintSocketClient {
                 }
                 break;
             case HID_STOP_LISTENING:
-                if (connection.isListening()) {
-                    connection.stopListening();
+                if (connection.isDeviceListening()) {
+                    connection.stopDeviceListening();
                     sendResult(session, UID, null);
                 } else {
                     sendError(session, UID, "Not already listening HID device events");
@@ -455,14 +518,118 @@ public class PrintSocketClient {
                 break;
             }
 
-            case WEBSOCKET_GET_NETWORK_INFO:
-                sendResult(session, UID, NetworkUtilities.getNetworkJSON(params.optString("hostname", "google.com"), params.optInt("port", 443)));
+            case FILE_START_LISTENING: {
+                FileParams fileParams = new FileParams(params);
+                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, true);
+                FileIO fileIO = new FileIO(session, params, fileParams.getPath(), absPath);
+
+                if (connection.getFileListener(absPath) == null && !fileIO.isWatching()) {
+                    connection.addFileListener(absPath, fileIO);
+
+                    FileUtilities.setupListener(fileIO);
+                    sendResult(session, UID, null);
+                } else {
+                    sendError(session, UID, "Already listening to path events");
+                }
+
+                break;
+            }
+            case FILE_STOP_LISTENING: {
+                if (params.isNull("path")) {
+                    connection.removeAllFileListeners();
+                    sendResult(session, UID, null);
+                } else {
+                    Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, true);
+                    FileIO fileIO = connection.getFileListener(absPath);
+
+                    if (fileIO != null) {
+                        fileIO.close();
+                        FileWatcher.deregisterWatch(fileIO);
+                        connection.removeFileListener(absPath);
+                        sendResult(session, UID, null);
+                    } else {
+                        sendError(session, UID, "Not already listening to path events");
+                    }
+                }
+
+                break;
+            }
+            case FILE_LIST: {
+                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, true);
+
+                if (Files.exists(absPath)) {
+                    if (Files.isDirectory(absPath)) {
+                        ArrayList<String> files = new ArrayList<>();
+                        Files.list(absPath).forEach(file -> files.add(file.getFileName().toString()));
+                        sendResult(session, UID, new JSONArray(files));
+                    } else {
+                        log.error("Failed to list '{}' (not a directory)", absPath);
+                        sendError(session, UID, "Path is not a directory");
+                    }
+                } else {
+                    log.error("Failed to list '{}' (does not exist)", absPath);
+                    sendError(session, UID, "Path does not exist");
+                }
+
+                break;
+            }
+            case FILE_READ: {
+                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, false);
+                if (Files.exists(absPath)) {
+                    if (Files.isReadable(absPath)) {
+                        sendResult(session, UID, new String(Files.readAllBytes(absPath)));
+                    } else {
+                        log.error("Failed to read '{}' (not readable)", absPath);
+                        sendError(session, UID, "Path is not readable");
+                    }
+                } else {
+                    log.error("Failed to read '{}' (does not exist)", absPath);
+                    sendError(session, UID, "Path does not exist");
+                }
+
+                break;
+            }
+            case FILE_WRITE: {
+                FileParams fileParams = new FileParams(params);
+                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, false);
+
+                Files.createDirectories(absPath.getParent());
+                Files.write(absPath, fileParams.getData(), StandardOpenOption.CREATE, fileParams.getAppendMode());
+                sendResult(session, UID, null);
+                break;
+            }
+            case FILE_REMOVE: {
+                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, false);
+
+                if (Files.exists(absPath)) {
+                    Files.delete(absPath);
+                    sendResult(session, UID, null);
+                } else {
+                    log.error("Failed to remove '{}' (does not exist)", absPath);
+                    sendError(session, UID, "Path does not exist");
+                }
+
+                break;
+            }
+            case NETWORKING_DEVICE_LEGACY:
+                JSONObject networkDevice = NetworkUtilities.getDeviceJSON(params.optString("hostname", "google.com"), params.optInt("port", 443));
+                JSONObject legacyDevice = new JSONObject();
+                legacyDevice.put("ipAddress", networkDevice.optString("ip", null));
+                legacyDevice.put("macAddress", networkDevice.optString("mac", null));
+                sendResult(session, UID, legacyDevice);
+                break;
+            case NETWORKING_DEVICE:
+                sendResult(session, UID, NetworkUtilities.getDeviceJSON(params.optString("hostname", "google.com"), params.optInt("port", 443)));
+                break;
+            case NETWORKING_DEVICES:
+                sendResult(session, UID, NetworkUtilities.getDevicesJSON(params.optString("hostname", "google.com"), params.optInt("port", 443)));
                 break;
             case GET_VERSION:
                 sendResult(session, UID, Constants.VERSION);
                 break;
 
-            case INVALID: default:
+            case INVALID:
+            default:
                 sendError(session, UID, "Invalid function call: " + json.optString("call", "NONE"));
                 break;
         }
@@ -532,7 +699,9 @@ public class PrintSocketClient {
      */
     public static void sendError(Session session, String messageUID, Exception ex) {
         String message = ex.getMessage();
-        if (message == null) { message = ex.getClass().getSimpleName(); }
+        if (message == null || message.equals("")) {
+            message = ex.getClass().getSimpleName();
+        }
 
         sendError(session, messageUID, message);
     }

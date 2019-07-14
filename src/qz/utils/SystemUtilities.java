@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.Constants;
 import qz.common.TrayManager;
+import qz.deploy.DeployUtilities;
 import qz.ui.LinkLabel;
 
 import javax.swing.*;
@@ -77,9 +78,9 @@ public class SystemUtilities {
 
     /**
      * Retrieve OS-specific Application Data directory such as:
-     * {@code C:\Users\John\AppData\Roaming\.qz} on Windows
+     * {@code C:\Users\John\AppData\Roaming\qz} on Windows
      * -- or --
-     * {@code /Users/John/Library/Application Support/.qz} on Mac
+     * {@code /Users/John/Library/Application Support/qz} on Mac
      * -- or --
      * {@code /home/John/.qz} on Linux
      *
@@ -103,6 +104,42 @@ public class SystemUtilities {
         return parent + File.separator + folder;
     }
 
+    /**
+     * Returns the OS shared data directory for FileIO operations. Must match
+     * that defined in desktop installer scripts, which create directories
+     * and grant read/write access to normal users.
+     * access.
+     * @return
+     */
+    public static String getSharedDataDirectory() {
+        String parent;
+
+        if (isWindows()) {
+            parent = System.getenv("PROGRAMDATA");
+        } else if (isMac()) {
+            parent = "/Library/Application Support/";
+        } else {
+            parent = "/srv/";
+        }
+
+        return parent + File.separator + Constants.DATA_DIR;
+    }
+
+    public static String getSharedDirectory() {
+        String parent = DeployUtilities.getSystemShortcutCreator().getParentDirectory();
+        String folder = Constants.SHARED_DATA_DIR;
+
+        return parent + File.separator + folder;
+    }
+
+    /**
+     * Detect 32-bit JVM on 64-bit Windows
+     * @return
+     */
+    public static boolean isWow64() {
+        String arch = System.getProperty("os.arch");
+        return isWindows() && !arch.contains("x86_64") && !arch.contains("amd64") && System.getenv("PROGRAMFILES(x86)") != null;
+    }
 
     /**
      * Determine if the current Operating System is Windows

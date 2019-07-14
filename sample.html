@@ -61,7 +61,7 @@
                             <button type="button" class="btn btn-success" onclick="startConnection();">Connect</button>
                             <button type="button" class="btn btn-warning" onclick="endConnection();">Disconnect</button>
                         </div>
-                        <button type="button" class="btn btn-info" onclick="listNetworkInfo();">List Network Info</button>
+                        <button type="button" class="btn btn-info" onclick="listNetworkDevices();">List Network Info</button>
                     </div>
                 </div>
             </div>
@@ -83,6 +83,9 @@
                             <button type="button" class="btn btn-default btn-sm" onclick="findPrinter($('#printerSearch').val(), true);">Find Printer</button>
                             <button type="button" class="btn btn-default btn-sm" onclick="findDefaultPrinter(true);">Find Default Printer</button>
                             <button type="button" class="btn btn-default btn-sm" onclick="findPrinters();">Find All Printers</button>
+                        </div>
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-default btn-sm" onclick="detailPrinters();">Get Printer Details</button>
                         </div>
                     </div>
                     <hr />
@@ -108,6 +111,8 @@
                 <li id="serialTab" role="presentation"><a href="#serialContent" role="tab" data-toggle="tab">Serial</a></li>
                 <li id="usbTab" role="presentation"><a href="#usbContent" role="tab" data-toggle="tab">USB</a></li>
                 <li id="hidTab" role="presentation"><a href="#hidContent" role="tab" data-toggle="tab">HID</a></li>
+                <li id="statusTab" role="presentation"><a href="#statusContent" role="tab" data-toggle="tab">Printer Status</a></li>
+                <li id="fileTab" role="presentation"><a href="#fileContent" role="tab" data-toggle="tab">Files</a></li>
             </ul>
         </div>
 
@@ -135,29 +140,15 @@
                     <div class="col-md-6">
                         <div class="form-group">
                             <div>
-                                <label>Print Sample To Type</label>
-                            </div>
-                            <div class="btn-group">
-                                <button type="button" class="btn btn-default" onclick="printEPL();">EPL</button>
-                                <button type="button" class="btn btn-default" onclick="printZPL();">ZPL</button>
-                                <button type="button" class="btn btn-default" onclick="printEvolis();">Evolis</button>
-                                <button type="button" class="btn btn-default" onclick="printESCPOS();">ESC/POS</button>
-                                <button type="button" class="btn btn-default" onclick="printEPCL();">EPCL (Zebra Card Printer)</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div>
                                 <label>Print Data</label>
                             </div>
                             <div class="btn-group">
+                                <button type="button" class="btn btn-default" onclick="printCommand();">Commands</button>
                                 <button type="button" class="btn btn-default" onclick="printBase64();">Base64</button>
                                 <button type="button" class="btn btn-default" onclick="printXML();">XML</button>
                                 <button type="button" class="btn btn-default" onclick="printHex();">Hex</button>
                             </div>
                         </div>
-                    </div>
-
-                    <div class="col-md-6">
                         <div class="form-group">
                             <div>
                                 <label>Print From File</label>
@@ -169,58 +160,140 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <div>
+                                <label>Raster Print</label>
+                            </div>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-default" onclick="printRawImage();">Image</button>
+                                <button type="button" class="btn btn-default" onclick="printRawPDF();">PDF</button>
+                                <button type="button" class="btn btn-default" onclick="printRawHTML();">HTML</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="row" style="margin-top: 1em;">
                     <div class="col-md-12">
                         <div class="panel panel-default">
-                            <div class="panel-heading">
-                                <h4 class="panel-title">Options</h4>
-                            </div>
-
                             <div class="panel-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="form-group form-inline">
-                                            <label for="rawEncoding">Encoding</label>
-                                            <input type="text" id="rawEncoding" class="form-control pull-right" />
-                                        </div>
 
-                                        <div class="form-group form-inline">
-                                            <label for="rawEndOfDoc">End Of Doc</label>
-                                            <input type="text" id="rawEndOfDoc" class="form-control pull-right" />
-                                        </div>
+                                <fieldset>
+                                    <legend>Config Options</legend>
 
-                                        <div class="form-group form-inline">
-                                            <label for="rawPerSpool">Per Spool</label>
-                                            <input type="number" id="rawPerSpool" class="form-control pull-right" />
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group form-inline">
+                                                <label for="rawEncoding">Encoding</label>
+                                                <input type="text" id="rawEncoding" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="rawEndOfDoc">End Of Doc</label>
+                                                <input type="text" id="rawEndOfDoc" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="rawPerSpool">Per Spool</label>
+                                                <input type="number" id="rawPerSpool" class="form-control pull-right" />
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group form-inline">
+                                                <label class="tip" for="rawAltPrinting" data-toggle="tooltip" title="Bypass driver when using CUPS">
+                                                    Alternate Printing
+                                                </label>
+                                                <input type="checkbox" id="rawAltPrinting" class="pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="rawCopies">Copies</label>
+                                                <input type="number" id="rawCopies" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label class="tip" for="rawJobName" data-toggle="tooltip" title="Job title as it appears in print queue">
+                                                    Job Name
+                                                </label>
+                                                <input type="text" id="rawJobName" class="form-control pull-right" />
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="col-md-6">
-                                        <div class="form-group form-inline">
-                                            <label for="rawAltPrinting">Alternate Printing</label>
-                                            <input type="checkbox" id="rawAltPrinting" class="pull-right" />
-                                        </div>
+                                </fieldset>
 
-                                        <div class="form-group form-inline">
-                                            <label for="rawCopies">Copies</label>
-                                            <input type="number" id="rawCopies" class="form-control pull-right" />
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label class="tip" for="rawJobName" data-toggle="tooltip" title="Job title as it appears in print queue">
-                                                Job Name
-                                            </label>
-                                            <input type="text" id="rawJobName" class="form-control pull-right" />
-                                        </div>
-                                    </div>
-                                </div>
                                 <hr />
+
+                                <fieldset>
+                                    <legend>Printer Options</legend>
+
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label>Language</label>
+                                                <div>
+                                                    <label>
+                                                        <input type="radio" name="pLanguage" id="pLangEPL" value="EPL" />
+                                                        EPL2
+                                                    </label>
+                                                    <label>
+                                                        <input type="radio" name="pLanguage" id="pLangZPL" value="ZPL" />
+                                                        ZPLII
+                                                    </label>
+                                                    <br />
+                                                    <label>
+                                                        <input type="radio" name="pLanguage" id="pLangESCP" value="ESCP" />
+                                                        ESC/POS
+                                                    </label>
+                                                    <label>
+                                                        <input type="radio" name="pLanguage" id="pLangEPCL" value="EPCL" />
+                                                        EPCL
+                                                    </label>
+                                                    <label>
+                                                        <input type="radio" name="pLanguage" id="pLangEVOLIS" value="EVOLIS" />
+                                                        Evolis
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="form-group form-inline">
+                                                <label for="pX">Image X</label>
+                                                <input type="number" id="pX" class="form-control pull-right" />
+                                            </div>
+                                            <div class="form-group form-inline">
+                                                <label for="pY">Image Y</label>
+                                                <input type="number" id="pY" class="form-control pull-right" />
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group form-inline">
+                                                <label class="tip" for="pDotDensity" data-toggle="tooltip" title="For ESCPOS only">Dot Density</label>
+                                                <input type="text" id="pDotDensity" class="form-control pull-right" />
+                                            </div>
+                                            <div class="form-group form-inline">
+                                                <label for="pXml">XML Tag</label>
+                                                <input type="text" id="pXml" class="form-control pull-right" />
+                                            </div>
+                                            <div class="form-group form-inline">
+                                                <label for="pRawWidth" class="tip" data-toggle="tooltip" title="In pixels">Render Width</label>
+                                                <input type="number" id="pRawWidth" class="form-control pull-right" />
+                                            </div>
+                                            <div class="form-group form-inline">
+                                                <label for="pRawHeight" class="tip" data-toggle="tooltip" title="In pixels">Render Height</label>
+                                                <input type="number" id="pRawHeight" class="form-control pull-right" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </fieldset>
+
+                                <hr />
+
                                 <div class="row">
                                     <div class="col-md-12">
                                         <button type="button" class="btn btn-danger pull-right" onclick="resetRawOptions();">Reset</button>
                                     </div>
                                 </div>
+
                             </div>
                         </div>
                     </div>
@@ -255,167 +328,195 @@
                 <div class="row" style="margin-top: 1em;">
                     <div class="col-md-12">
                         <div class="panel panel-default">
-                            <div class="panel-heading">
-                                <h4 class="panel-title">Options</h4>
-                            </div>
-
                             <div class="panel-body">
-                                <div class="row">
-                                    <div class="col-md-6">
 
-                                        <div class="form-group form-inline">
-                                            <label for="pxlColorType">Color Type</label>
-                                            <select id="pxlColorType" class="form-control pull-right">
-                                                <option value="color">Color</option>
-                                                <option value="grayscale">Grayscale</option>
-                                                <option value="blackwhite">Black & White</option>
-                                            </select>
+                                <fieldset>
+                                    <legend>Config Options</legend>
+
+                                    <div class="row">
+                                        <div class="col-md-6">
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlColorType">Color Type</label>
+                                                <select id="pxlColorType" class="form-control pull-right">
+                                                    <option value="color">Color</option>
+                                                    <option value="grayscale">Grayscale</option>
+                                                    <option value="blackwhite">Black & White</option>
+                                                </select>
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlCopies">Copies</label>
+                                                <input type="number" id="pxlCopies" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlDensity" class="tip" data-toggle="tooltip"
+                                                       title="DPI, DPCM, or DPMM depending on units specified">Density
+                                                </label>
+                                                <input type="number" id="pxlDensity" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlDuplex"> Duplex</label>
+                                                <input type="checkbox" id="pxlDuplex" class="pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlInterpolation">Interpolation</label>
+                                                <select id="pxlInterpolation" class="form-control pull-right">
+                                                    <option value="">Default</option>
+                                                    <option value="bicubic">Bicubic</option>
+                                                    <option value="bilinear">Bilinear</option>
+                                                    <option value="nearest-neighbor">Nearest Neighbor</option>
+                                                </select>
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label class="tip" for="pxlJobName" data-toggle="tooltip" title="Job title as it appears in print queue">
+                                                    Job Name
+                                                </label>
+                                                <input type="text" id="pxlJobName" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlLegacy">Legacy Printing</label>
+                                                <input type="checkbox" id="pxlLegacy" class="pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlOrientation">Orientation</label>
+                                                <select id="pxlOrientation" class="form-control pull-right">
+                                                    <option value="">Default</option>
+                                                    <option value="portrait">Portrait</option>
+                                                    <option value="landscape">Landscape</option>
+                                                    <option value="reverse-landscape">Landscape - Reverse</option>
+                                                </select>
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlPaperThickness">Paper<br />Thickness</label>
+                                                <input disabled type="number" step="any" id="pxlPaperThickness" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlPrinterTray">Printer Tray</label>
+                                                <input type="text" id="pxlPrinterTray" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlRasterize">Rasterize</label>
+                                                <input type="checkbox" id="pxlRasterize" class="pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlRotation">Rotation</label>
+                                                <input type="number" step="any" id="pxlRotation" class="form-control pull-right" />
+                                            </div>
                                         </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label>Units</label>
+                                                <div>
+                                                    <label>
+                                                        <input type="radio" name="pxlUnits" id="pxlUnitsIN" value="in" />
+                                                        IN
+                                                    </label>
+                                                    <label>
+                                                        <input type="radio" name="pxlUnits" id="pxlUnitsMM" value="mm" />
+                                                        MM
+                                                    </label>
+                                                    <label>
+                                                        <input type="radio" name="pxlUnits" id="pxlUnitsCM" value="cm" />
+                                                        CM
+                                                    </label>
+                                                </div>
+                                            </div>
 
-                                        <div class="form-group form-inline">
-                                            <label for="pxlCopies">Copies</label>
-                                            <input type="number" id="pxlCopies" class="form-control pull-right" />
-                                        </div>
+                                            <div class="form-group form-inline">
+                                                <label for="pxlScale">Scale Content:</label>
+                                                <input type="checkbox" id="pxlScale" class="pull-right" />
+                                            </div>
 
-                                        <div class="form-group form-inline">
-                                            <label for="pxlDensity" class="tip" data-toggle="tooltip"
-                                                   title="DPI, DPCM, or DPMM depending on units specified">Density
-                                            </label>
-                                            <input type="number" id="pxlDensity" class="form-control pull-right" />
-                                        </div>
+                                            <div class="form-group">
+                                                <label for="pxlMargins" class="tip" data-toggle="tooltip" title="In relation to units specified">Margins</label>
+                                                (
+                                                <label for="pxlMarginsActive" class="inline">Individual:</label>
+                                                <input type="checkbox" id="pxlMarginsActive" onclick="checkGroupActive('pxlMarginsActive', 'pxlMarginsGroup', 'pxlMargins');">
+                                                )
+                                                <input type="number" step="any" id="pxlMargins" class="form-control" />
+                                            </div>
+                                            <div class="inline" id="pxlMarginsGroup">
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlMarginsTop">&nbsp; Top:</label>
+                                                    <input type="number" step="any" id="pxlMarginsTop" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlMarginsRight">&nbsp; Right:</label>
+                                                    <input type="number" step="any" id="pxlMarginsRight" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlMarginsBottom">&nbsp; Bottom:</label>
+                                                    <input type="number" step="any" id="pxlMarginsBottom" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlMarginsLeft">&nbsp; Left:</label>
+                                                    <input type="number" step="any" id="pxlMarginsLeft" class="form-control pull-right" />
+                                                </div>
+                                            </div>
 
-                                        <div class="form-group form-inline">
-                                            <label for="pxlDuplex"> Duplex</label>
-                                            <input type="checkbox" id="pxlDuplex" class="pull-right" />
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label for="pxlInterpolation">Interpolation</label>
-                                            <select id="pxlInterpolation" class="form-control pull-right">
-                                                <option value="">Default</option>
-                                                <option value="bicubic">Bicubic</option>
-                                                <option value="bilinear">Bilinear</option>
-                                                <option value="nearest-neighbor">Nearest Neighbor</option>
-                                            </select>
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label class="tip" for="pxlJobName" data-toggle="tooltip" title="Job title as it appears in print queue">
-                                                Job Name
-                                            </label>
-                                            <input type="text" id="pxlJobName" class="form-control pull-right" />
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label for="pxlLegacy">Legacy Printing</label>
-                                            <input type="checkbox" id="pxlLegacy" class="pull-right" />
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label for="pxlOrientation">Orientation</label>
-                                            <select id="pxlOrientation" class="form-control pull-right">
-                                                <option value="">Default</option>
-                                                <option value="portrait">Portrait</option>
-                                                <option value="landscape">Landscape</option>
-                                                <option value="reverse-landscape">Landscape - Reverse</option>
-                                            </select>
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label for="pxlPaperThickness">Paper<br />Thickness</label>
-                                            <input disabled type="number" step="any" id="pxlPaperThickness" class="form-control pull-right" />
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label for="pxlPrinterTray">Printer Tray</label>
-                                            <input disabled type="text" id="pxlPrinterTray" class="form-control pull-right" />
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label for="pxlRasterize">Rasterize</label>
-                                            <input type="checkbox" id="pxlRasterize" class="pull-right" />
-                                        </div>
-
-                                        <div class="form-group form-inline">
-                                            <label for="pxlRotation">Rotation</label>
-                                            <input type="number" step="any" id="pxlRotation" class="form-control pull-right" />
+                                            <div class="form-group">
+                                                <label class="inline">Size</label>
+                                                (
+                                                <label for="pxlSizeActive" class="inline">Enable:</label>
+                                                <input type="checkbox" id="pxlSizeActive" onclick="checkGroupActive('pxlSizeActive', 'pxlSizeGroup');" />
+                                                )
+                                            </div>
+                                            <div class="inline" id="pxlSizeGroup">
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlSizeWidth" class="tip" data-toggle="tooltip" title="In relation to units specified">
+                                                        &nbsp; Width:
+                                                    </label>
+                                                    <input type="number" step="any" id="pxlSizeWidth" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlSizeHeight" class="tip" data-toggle="tooltip" title="In relation to units specified">
+                                                        &nbsp; Height:
+                                                    </label>
+                                                    <input type="number" step="any" id="pxlSizeHeight" class="form-control pull-right" />
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="col-md-6">
-                                        <div class="form-group">
-                                            <label>Units</label>
-                                            <div>
-                                                <label>
-                                                    <input type="radio" name="pxlUnits" id="pxlUnitsIN" value="in" />
-                                                    IN
-                                                </label>
-                                                <label>
-                                                    <input type="radio" name="pxlUnits" id="pxlUnitsMM" value="mm" />
-                                                    MM
-                                                </label>
-                                                <label>
-                                                    <input type="radio" name="pxlUnits" id="pxlUnitsCM" value="cm" />
-                                                    CM
-                                                </label>
-                                            </div>
-                                        </div>
+                                </fieldset>
 
-                                        <div class="form-group form-inline">
-                                            <label for="pxlScale">Scale Content:</label>
-                                            <input type="checkbox" id="pxlScale" class="pull-right" />
-                                        </div>
-
-                                        <div class="form-group">
-                                            <label for="pxlMargins" class="tip" data-toggle="tooltip" title="In relation to units specified">Margins</label>
-                                            (
-                                            <label for="pxlMarginsActive" class="inline">Individual:</label>
-                                            <input type="checkbox" id="pxlMarginsActive" onclick="checkMarginsActive();">
-                                            )
-                                            <input type="number" step="any" id="pxlMargins" class="form-control" />
-                                        </div>
-                                        <div class="inline" id="pxlMarginsGroup">
-                                            <div class="form-group form-inline">
-                                                <label for="pxlMarginsTop">&nbsp; Top:</label>
-                                                <input type="number" step="any" id="pxlMarginsTop" class="form-control pull-right" />
-                                            </div>
-                                            <div class="form-group form-inline">
-                                                <label for="pxlMarginsRight">&nbsp; Right:</label>
-                                                <input type="number" step="any" id="pxlMarginsRight" class="form-control pull-right" />
-                                            </div>
-                                            <div class="form-group form-inline">
-                                                <label for="pxlMarginsBottom">&nbsp; Bottom:</label>
-                                                <input type="number" step="any" id="pxlMarginsBottom" class="form-control pull-right" />
-                                            </div>
-                                            <div class="form-group form-inline">
-                                                <label for="pxlMarginsLeft">&nbsp; Left:</label>
-                                                <input type="number" step="any" id="pxlMarginsLeft" class="form-control pull-right" />
-                                            </div>
-                                        </div>
-
-                                        <div class="form-group">
-                                            <label class="inline">Size</label>
-                                            (
-                                            <label for="pxlSizeActive" class="inline">Enable:</label>
-                                            <input type="checkbox" id="pxlSizeActive" onclick="checkSizeActive();" />
-                                            )
-                                        </div>
-                                        <div class="inline" id="pxlSizeGroup">
-                                            <div class="form-group form-inline">
-                                                <label for="pxlSizeWidth" class="tip" data-toggle="tooltip" title="In relation to units specified">
-                                                    &nbsp; Width:
-                                                </label>
-                                                <input type="number" step="any" id="pxlSizeWidth" class="form-control pull-right" />
-                                            </div>
-                                            <div class="form-group form-inline">
-                                                <label for="pxlSizeHeight" class="tip" data-toggle="tooltip" title="In relation to units specified">
-                                                    &nbsp; Height:
-                                                </label>
-                                                <input type="number" step="any" id="pxlSizeHeight" class="form-control pull-right" />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
                                 <hr />
+
+                                <fieldset>
+                                    <legend>Printer Options</legend>
+
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group form-inline">
+                                                <label for="pPxlWidth" class="tip" data-toggle="tooltip" title="In relation to units specified">
+                                                    Render Width
+                                                </label>
+                                                <input type="number" id="pPxlWidth" class="form-control pull-right" />
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group form-inline">
+                                                <label for="pPxlHeight" class="tip" data-toggle="tooltip" title="In relation to units specified">
+                                                    Render Height
+                                                </label>
+                                                <input type="number" id="pPxlHeight" class="form-control pull-right" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </fieldset>
+
+                                <hr />
+
                                 <div class="row">
                                     <div class="col-md-12">
                                         <button type="button" class="btn btn-danger pull-right" onclick="resetPixelOptions();">Reset</button>
@@ -447,66 +548,156 @@
                 <div class="row" style="margin-top: 1em;">
                     <div class="col-md-12">
                         <div class="panel panel-default">
-                            <div class="panel-heading">
-                                <h4 class="panel-title">Options</h4>
-                            </div>
-
                             <div class="panel-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="form-group form-inline">
-                                            <label for="serialPort">Port</label>
-                                            <input type="text" id="serialPort" class="form-control pull-right" />
-                                        </div>
 
-                                        <div class="form-group form-inline">
-                                            <label for="serialCmd">Command</label>
-                                            <input type="text" id="serialCmd" class="form-control pull-right" />
-                                        </div>
+                                <fieldset>
+                                    <legend>Options</legend>
 
-                                        <div class="form-group form-inline">
-                                            <label for="serialStart">Response Start</label>
-                                            <input type="text" id="serialStart" class="form-control pull-right" />
-                                        </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group form-inline">
+                                                <label for="serialPort">Port</label>
+                                                <input type="text" id="serialPort" class="form-control pull-right" />
+                                            </div>
 
-                                        <div class="form-group form-inline">
-                                            <label for="serialEnd">Response End</label>
-                                            <input type="text" id="serialEnd" class="form-control pull-right" />
-                                        </div>
+                                            <div class="form-group form-inline">
+                                                <label for="serialBaud">Baud Rate</label>
+                                                <input type="number" id="serialBaud" class="form-control pull-right" />
+                                            </div>
 
-                                        <div class="form-group form-inline">
-                                            <!-- Overrides response Start/End fields -->
-                                            <label for="serialWidth">Response Length</label>
-                                            <input type="number" id="serialWidth" class="form-control pull-right" />
+                                            <div class="form-group form-inline">
+                                                <label for="serialData">Data Bits</label>
+                                                <input type="number" id="serialData" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="serialStop">Stop Bits</label>
+                                                <input type="number" id="serialStop" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="serialParity">Parity</label>
+                                                <input type="text" id="serialParity" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="serialFlow">Flow Control</label>
+                                                <input type="text" id="serialFlow" class="form-control pull-right" />
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group form-inline">
+                                                <label for="serialCmd">Data</label>
+                                                <input type="text" id="serialCmd" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label>Data Type</label>
+                                                <div class="pull-right">
+                                                    <label>
+                                                        <input type="radio" name="serialType" id="serialPlainRadio" value="PLAIN"/>
+                                                        Plain
+                                                    </label>
+                                                    <label>
+                                                        <input type="radio" name="serialType" id="serialFileRadio" value="FILE"/>
+                                                        File
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="serialWidth">Encoding</label>
+                                                <input type="text" id="serialEncoding" class="form-control pull-right" />
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="col-md-6">
-                                        <div class="form-group form-inline">
-                                            <label for="serialBaud">Baud Rate</label>
-                                            <input type="number" id="serialBaud" class="form-control pull-right" />
-                                        </div>
+                                </fieldset>
 
-                                        <div class="form-group form-inline">
-                                            <label for="serialData">Data Bits</label>
-                                            <input type="number" id="serialData" class="form-control pull-right" />
-                                        </div>
+                                <hr/>
 
-                                        <div class="form-group form-inline">
-                                            <label for="serialStop">Stop Bits</label>
-                                            <input type="number" id="serialStop" class="form-control pull-right" />
-                                        </div>
+                                <fieldset>
+                                    <legend>Response Options</legend>
 
-                                        <div class="form-group form-inline">
-                                            <label for="serialParity">Parity</label>
-                                            <input type="text" id="serialParity" class="form-control pull-right" />
-                                        </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group form-inline">
+                                                <label for="serialStart">Start Bytes</label>
+                                                <input type="text" id="serialStart" class="form-control pull-right" />
+                                            </div>
 
-                                        <div class="form-group form-inline">
-                                            <label for="serialFlow">Flow Control</label>
-                                            <input type="text" id="serialFlow" class="form-control pull-right" />
+                                            <div class="form-group form-inline">
+                                                <label for="serialEnd">End Byte</label>
+                                                <input type="text" id="serialEnd" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="serialWidth">Width</label>
+                                                <input type="number" id="serialWidth" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="serialHeader">Include Header</label>
+                                                <input type="checkbox" id="serialHeader" class="form-control pull-right" />
+                                            </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="serialRespEncoding">Encoding</label>
+                                                <input type="text" id="serialRespEncoding" class="form-control pull-right" />
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label class="inline">Length Bytes</label>
+                                                (
+                                                <label for="serialLengthActive" class="inline">Enable:</label>
+                                                <input type="checkbox" id="serialLengthActive" onclick="checkGroupActive('serialLengthActive', 'serialLengthGroup');" />
+                                                )
+                                            </div>
+                                            <div class="inline" id="serialLengthGroup">
+                                                <div class="form-group form-inline">
+                                                    <label for="serialLenIndex">&nbsp; Index:</label>
+                                                    <input type="number" id="serialLenIndex" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="serialLenLength">&nbsp; Length:</label>
+                                                    <input type="number" id="serialLenLength" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label>&nbsp; Endian:</label>
+                                                    <div class="pull-right">
+                                                        <label>
+                                                            <input type="radio" name="serialLenEndian" id="serialLenEndianBig" value="BIG" />
+                                                            Big
+                                                        </label>
+                                                        <label>
+                                                            <input type="radio" name="serialLenEndian" id="serialLenEndianLittle" value="LITTLE" />
+                                                            Little
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label class="inline">CRC Bytes</label>
+                                                (
+                                                <label for="serialCrcActive" class="inline">Enable:</label>
+                                                <input type="checkbox" id="serialCrcActive" onclick="checkGroupActive('serialCrcActive', 'serialCrcGroup');" />
+                                                )
+                                            </div>
+                                            <div class="inline" id="serialCrcGroup">
+                                                <div class="form-group form-inline">
+                                                    <label for="serialCrcIndex">&nbsp; Index:</label>
+                                                    <input type="number" id="serialCrcIndex" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="serialCrcLength">&nbsp; Length:</label>
+                                                    <input type="number" id="serialCrcLength" class="form-control pull-right" />
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
+                                </fieldset>
+
                                 <hr />
                                 <div class="row">
                                     <div class="col-md-12">
@@ -551,10 +742,12 @@
                                 </div>
                                 <div class="btn-group" data-toggle="buttons">
                                     <label id="usbRawRadio" class="btn btn-default active">
-                                        <input type="radio" autocomplete="off" checked>Raw
+                                        <input type="radio" autocomplete="off" checked>
+                                        Raw
                                     </label>
                                     <label id="usbWeightRadio" class="btn btn-default">
-                                        <input type="radio" autocomplete="off">Weight
+                                        <input type="radio" autocomplete="off">
+                                        Weight
                                     </label>
                                 </div>
                             </div>
@@ -604,7 +797,9 @@
                                         </div>
 
                                         <div class="form-group form-inline">
-                                            <label for="usbStream" class="tip" data-toggle="tooltip" title="Streaming Only: In milliseconds">Stream Interval</label>
+                                            <label for="usbStream" class="tip" data-toggle="tooltip" title="Streaming Only: In milliseconds">
+                                                Stream Interval
+                                            </label>
                                             <input type="text" id="usbStream" class="form-control pull-right" />
                                         </div>
                                     </div>
@@ -655,10 +850,12 @@
                                 </div>
                                 <div class="btn-group" data-toggle="buttons">
                                     <label id="hidRawRadio" class="btn btn-default active">
-                                        <input type="radio" autocomplete="off" checked>Raw
+                                        <input type="radio" autocomplete="off" checked>
+                                        Raw
                                     </label>
                                     <label id="hidWeightRadio" class="btn btn-default">
-                                        <input type="radio" autocomplete="off">Weight
+                                        <input type="radio" autocomplete="off">
+                                        Weight
                                     </label>
                                 </div>
                             </div>
@@ -687,12 +884,18 @@
                                         </div>
 
                                         <div class="form-group form-inline">
-                                            <label for="hidUsagePage" class="tip" data-toggle="tooltip" title="Optional: For devices that expose multiple endpoints">Usage Page</label>
+                                            <label for="hidUsagePage" class="tip" data-toggle="tooltip"
+                                                   title="Optional: For devices that expose multiple endpoints">
+                                                Usage Page
+                                            </label>
                                             <input type="text" id="hidUsagePage" class="form-control pull-right" onblur="formatHexInput('hidUsagePage')" />
                                         </div>
 
                                         <div class="form-group form-inline">
-                                            <label for="hidSerial" class="tip" data-toggle="tooltip" title="Optional: For distinguishing between identical devices">Serial Number</label>
+                                            <label for="hidSerial" class="tip" data-toggle="tooltip"
+                                                   title="Optional: For distinguishing between identical devices">
+                                                Serial Number
+                                            </label>
                                             <input type="text" id="hidSerial" class="form-control pull-right" />
                                         </div>
                                     </div>
@@ -713,7 +916,9 @@
                                         </div>
 
                                         <div class="form-group form-inline">
-                                            <label for="hidStream" class="tip" data-toggle="tooltip" title="Streaming Only: In milliseconds">Stream Interval</label>
+                                            <label for="hidStream" class="tip" data-toggle="tooltip" title="Streaming Only: In milliseconds">
+                                                Stream Interval
+                                            </label>
                                             <input type="text" id="hidStream" class="form-control pull-right" />
                                         </div>
                                     </div>
@@ -722,6 +927,178 @@
                                 <div class="row">
                                     <div class="col-md-12">
                                         <button type="button" class="btn btn-danger pull-right" onclick="resetHidOptions();">Reset</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="statusContent" class="tab-pane col-md-8">
+                <h3>Printer Status</h3>
+                <hr />
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <div class="btn-toolbar">
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-info" onclick="startPrintersListen()">All Printers</button>
+                                    <button type="button" class="btn btn-success" onclick="startPrintersListen($('#configPrinter').html())">
+                                        Current Printer
+                                    </button>
+                                    <button type="button" class="btn btn-default" onclick="getPrintersStatus()">Request current status</button>
+                                </div>
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-warning" onclick="stopPrintersListen()">Stop Listening</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row" style="margin-top: 1em;">
+                    <div class="col-md-12">
+                        <div class="panel panel-default">
+                            <div class="panel-heading">
+                                <h4 class="panel-title">Event Log</h4>
+                            </div>
+
+                            <div class="panel-body">
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <div id="printersLog"></div>
+                                    </div>
+                                </div>
+                                <hr />
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <button type="button" class="btn btn-danger pull-right" onclick="clearPrintersLog();">Clear</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="fileContent" class="tab-pane col-md-8">
+                <h3>Files</h3>
+                <hr />
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <div class="btn-toolbar">
+                                <button type="button" class="btn btn-info" onclick="listFiles();">List Files</button>
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-info" onclick="readFile();">Read File</button>
+                                    <button type="button" class="btn btn-success" onclick="writeFile();">Write File</button>
+                                    <button type="button" class="btn btn-warning" onclick="deleteFile();">Delete File</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="btn-toolbar">
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-default" onclick="startFileListen()">Listen for Folder Events</button>
+                                    <button type="button" class="btn btn-default" onclick="stopFileListen()">Stop Listening</button>
+                                </div>
+                                <button type="button" class="btn btn-default" onclick="stopAllFileListeners();">Stop All Listeners</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row" style="margin-top: 1em;">
+                    <div class="col-md-12">
+                        <div class="panel panel-default">
+                            <div class="panel-heading">
+                                <h4 class="panel-title">Options</h4>
+                            </div>
+                            <div class="panel-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="fileLocation">
+                                                File / Directory Path
+                                            </label>
+                                            <input type="text" id="fileLocation" class="form-control" />
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="fileData">Data To Write</label>
+                                            <textarea id="fileData" rows="5" style="resize:vertical" class="form-control"></textarea>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group form-inline">
+                                            <label for="fileShared">
+                                                Shared
+                                            </label>
+                                            <input type="checkbox" id="fileShared" class="pull-right" />
+                                        </div>
+                                        <div class="form-group form-inline">
+                                            <label for="fileSandbox" data-toggle="tooltip">
+                                                Sandbox
+                                            </label>
+                                            <input checked type="checkbox" id="fileSandbox" class="pull-right" />
+                                        </div>
+                                        <div class="form-group form-inline">
+                                            <label for="fileAppend">
+                                                Append Data
+                                            </label>
+                                            <input type="checkbox" id="fileAppend" class="pull-right" />
+                                        </div>
+
+                                        <div class="form-group form-inline">
+                                            <label for="fileListenerData">
+                                                Listener Data
+                                            </label>
+                                            <input type="checkbox" id="fileListenerData" class="pull-right" onclick="checkGroupActive('fileListenerData', 'fileTriggersGroup')" />
+                                        </div>
+                                        <div class="inline" id="fileTriggersGroup">
+                                            <div class="form-group form-inline">
+                                                <label>
+                                                    Read direction
+                                                </label>
+                                                <div>
+                                                    <label>
+                                                        <input type="radio" name="fileDir" id="fileDirEnd" value="end" />
+                                                        End
+                                                    </label>
+                                                    <label>
+                                                        <input type="radio" name="fileDir" id="fileDirStart" value="begin" />
+                                                        Start
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="form-group form-inline">
+                                                <label>
+                                                    Truncate
+                                                </label>
+                                                <div>
+                                                    <label>
+                                                        <input type="radio" name="fileTruncate" id="fileTruncateLines" value="lines" />
+                                                        Lines
+                                                    </label>
+                                                    <label>
+                                                        <input type="radio" name="fileTruncate" id="fileTruncateBytes" value="bytes" />
+                                                        Bytes
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="fileLength">Truncate length</label>
+                                                <input type="number" id="fileLength" class="form-control pull-right" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr />
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <button type="button" class="btn btn-danger pull-right" onclick="resetFileOptions();">Reset</button>
                                     </div>
                                 </div>
                             </div>
@@ -890,23 +1267,42 @@
         }
     }
 
-    function listNetworkInfo() {
-        qz.websocket.getNetworkInfo().then(function(data) {
-            if (data.macAddress == null) { data.macAddress = 'UNKNOWN'; }
-            if (data.ipAddress == null) { data.ipAddress = "UNKNOWN"; }
 
-            var macFormatted = '';
-            for(var i = 0; i < data.macAddress.length; i++) {
-                macFormatted += data.macAddress[i];
-                if (i % 2 == 1 && i < data.macAddress.length - 1) {
-                    macFormatted += ":";
-                }
+    function listNetworkDevices() {
+        var listItems = function(obj) {
+            var html = '';
+            var labels = { mac: 'MAC', ip: 'IP', up: 'Up', ip4: 'IPv4', ip6: 'IPv6', primary: 'Primary' };
+
+            Object.keys(labels).forEach(function(key) {
+                if (!obj.hasOwnProperty(key)) { return; }
+                if (key !== 'ip' && obj[key] == obj['ip']) { return; }
+
+                var value = obj[key];
+                if (key === 'mac') { value = obj[key].match(/.{1,2}/g).join(':'); }
+                if (typeof obj[key] === 'object') { value = value.join(', '); }
+
+                html += '<li><strong>' + labels[key] + ':</strong> ' + value + '</li>';
+            });
+
+            return html;
+        };
+
+        qz.networking.devices().then(function(data) {
+            var list = '';
+            var hostname = '';
+            for(var i = 0; i < data.length; i++) {
+                var info = data[i];
+
+                if (i == 0) hostname = info.hostname;
+                list += "<li>" +
+                        "   <strong>" + (info.name || "UNKNOWN") + (info.id ? " (" + info.id + ")" : "") + "</strong>" +
+                        "   <ul>" + listItems(info) + "</ul>" +
+                        "</li>";
             }
 
-            displayMessage("<strong>IP:</strong> " + data.ipAddress + "<br/><strong>Physical Address:</strong> " + macFormatted);
+            pinMessage("<strong>Network details:</strong> (" + hostname + ")<br/><ul>" + list + "</ul>");
         }).catch(displayError);
     }
-
 
     /// Detection ///
     function findPrinter(query, set) {
@@ -931,80 +1327,84 @@
                 list += "&nbsp; " + data[i] + "<br/>";
             }
 
-            displayMessage("<strong>Available printers:</strong><br/>" + list);
+            displayMessage("<strong>Available printers:</strong><br/>" + list, null, 15000);
+        }).catch(displayError);
+    }
+
+    function detailPrinters() {
+        qz.printers.details().then(function(data) {
+            var list = '';
+            for(var i = 0; i < data.length; i++) {
+                list += "<li>" + (data[i].default ? "* " : "") + data[i].name + "<ul>" +
+                        "<li><strong>Driver:</strong> " + data[i].driver + "</li>" +
+                        "<li><strong>Density:</strong> " + data[i].density + "dpi</li>" +
+                        (data[i].trays ? "<li><strong>Trays:</strong> " + data[i].trays + "</li>" : "") +
+                        "</ul></li>";
+            }
+
+            pinMessage("<strong>Printer details:</strong><br/><ul>" + list + "</ul>");
         }).catch(displayError);
     }
 
 
     /// Raw Printers ///
-    function printEPL() {
+    function printCommand() {
         var config = getUpdatedConfig();
+        var lang = getUpdatedOptions().language; //print options not used with this flavor, just check language requested
 
-        var printData = [
-            '\nN\n',
-            'q609\n',
-            'Q203,26\n',
-            'B5,26,0,1A,3,7,152,B,"1234"\n',
-            'A310,26,0,3,1,1,N,"SKU 00000 MFG 0000"\n',
-            'A310,56,0,3,1,1,N,"QZ PRINT APPLET"\n',
-            'A310,86,0,3,1,1,N,"TEST PRINT SUCCESSFUL"\n',
-            'A310,116,0,3,1,1,N,"FROM SAMPLE.HTML"\n',
-            'A310,146,0,3,1,1,N,"QZ.IO"\n',
-            { type: 'raw', format: 'image', data: 'assets/img/image_sample_bw.png', options: { language: 'EPL', x: 150, y: 300 } },
-            '\nP1,1\n'
-        ];
+        var printData;
+        switch(lang) {
+            case 'EPL':
+                printData = [
+                    '\nN\n',
+                    'q609\n',
+                    'Q203,26\n',
+                    'B5,26,0,1A,3,7,152,B,"1234"\n',
+                    'A310,26,0,3,1,1,N,"SKU 00000 MFG 0000"\n',
+                    'A310,56,0,3,1,1,N,"TEST PRINT SUCCESSFUL"\n',
+                    'A310,86,0,3,1,1,N,"FROM SAMPLE.HTML"\n',
+                    'A310,116,0,3,1,1,N,"PRINTED WITH QZ ' + qzVersion + '"\n',
+                    '\nP1,1\n'
+                ];
+                break;
+            case 'ZPL':
+                printData = [
+                    '^XA\n',
+                    '^FO50,50^ADN,36,20^FDPRINTED WITH QZ ' + qzVersion + '\n',
+                    '^FS\n',
+                    '^XZ\n'
+                ];
+                break;
+            case 'ESCP':
+                printData = [
+                    //defaults to 'type: raw', 'format: command', and 'flavor: plain'
+                    { data: '\nPRINTED WITH QZ' + qzVersion + '.\n\n\n\n\n\n' }
+                ];
+                break;
+            case 'EPCL':
+                printData = buildEPCL();
+                break;
+            case 'EVOLIS':
+                printData = [
+                    '\x1BPps;0\x0D',   // Enable raw/disable driver printer parameter supervision
+                    '\x1BPwr;0\x0D',   // Landscape (zero degree) orientation
+                    '\x1BWcb;k;0\x0D', // Clear card memory
+
+                    '\x1BSs\x0D',      // Start of sequence
+                    { type: 'raw', format: 'image', data: 'assets/img/fade-test.png', options: { language: "EVOLIS", precision: 128 } },
+                    '\x1BWt;50;60;0;30;Printed using QZ Tray ' + qzVersion + '\x0D', // 50,60 = coordinates; 0 = arial font
+                    '\x1BSe\x0D'       // End of sequence
+                ];
+                break;
+            default:
+                displayError("Sample page cannot print commands using this printer language");
+                return;
+        }
 
         qz.print(config, printData).catch(displayError);
     }
 
-    function printZPL() {
-        var config = getUpdatedConfig();
-
-        var printData = [
-            '^XA\n',
-            '^FO50,100',
-            { type: 'raw', format: 'image', data: 'assets/img/image_sample_bw.png', options: { language: 'ZPLII' } },
-	    '^FS\n',
-	    '^FO50,300^ADN,36,20^FDPRINTED USING^FS\n',
-            '^FO50,350^ADN,36,20^FDQZ-TRAY ^FS\n',
-	    '^FO50,400^ADN,36,20^FDVERSION ' + qzVersion + '^FS\n' + '\n',
-	    '^XZ\n'
-        ];
-
-        qz.print(config, printData).catch(displayError);
-    }
-
-    function printEvolis() {
-        var config = getUpdatedConfig();
-
-        var printData = [
-            '\x1BPps;0\x0D',   // Enable raw/disable driver printer parameter supervision
-            '\x1BPwr;0\x0D',   // Landscape (zero degree) orientation
-            '\x1BWcb;k;0\x0D', // Clear card memory
-
-            '\x1BSs\x0D',      // Start of sequence
-            { type: 'raw', format: 'image', data: 'assets/img/fade-test.png', options: { language: "EVOLIS", precision: 128 } },
-            '\x1BWt;50;60;0;30;Printed using QZ Tray ' + qzVersion + '\x0D', // 50,60 = coordinates; 0 = arial font
-            '\x1BSe\x0D'       // End of sequence
-        ];
-
-        qz.print(config, printData).catch(displayError);
-    }
-
-    function printESCPOS() {
-        var config = getUpdatedConfig();
-
-        var printData = [
-            { type: 'raw', format: 'image', data: 'assets/img/image_sample_bw.png', options: { language: 'ESCPOS', dotDensity: 'single' } },
-            { type: 'raw', data: '\nPrinted using qz-tray plugin.\n\n\n\n\n\n' }
-        ];
-
-        qz.print(config, printData).catch(displayError);
-    }
-
-    function printEPCL() {
-        var config = getUpdatedConfig();
-
+    function buildEPCL() {
         var printData = [];
         $.merge(printData, convertEPCL('+RIB 4'));     // Monochrome ribbon
         $.merge(printData, convertEPCL('F'));          // Clear monochrome print buffer
@@ -1019,7 +1419,7 @@
         $.merge(printData, convertEPCL('I 10'));       // Print card (10 returns to print ready pos.)
         $.merge(printData, convertEPCL('MO'));         // Move card to output hopper
 
-        qz.print(config, printData).catch(displayError);
+        return printData;
     }
 
     /**
@@ -1035,16 +1435,19 @@
         var len = (data.length + 2).toString(16);
         if (len.length < 2) { len = '0' + len; }
 
+        //defaults to 'type: raw' and 'format: command'
         return [
-            { type: 'raw', format: 'hex', data: 'x00x00x00' },  // Append 3 NULs
-            { type: 'raw', format: 'hex', data: 'x' + len },    // Append our command length, in base16
-            { type: 'raw', format: 'plain', data: data },       // Append our command
-            { type: 'raw', format: 'plain', data: '\r' }        // Append carriage return
+            { flavor: 'hex', data: 'x00x00x00' },  // Append 3 NULs
+            { flavor: 'hex', data: 'x' + len },    // Append our command length, in base16
+            { flavor: 'plain', data: data },       // Append our command
+            { flavor: 'plain', data: '\r' }        // Append carriage return
         ];
     }
 
+    /* Sample EPL Only */
     function printBase64() {
         var config = getUpdatedConfig();
+        //print options not used with this flavor
 
         // Send base64 encoded characters/raw commands to qz using data type 'base64'.
         // This will automatically convert provided base64 encoded text into text/ascii/bytes, etc.
@@ -1054,96 +1457,97 @@
         //noinspection SpellCheckingInspection
         var printData = [
             {
-                type: 'raw',
-                format: 'base64',
+                type: 'raw', format: 'command', flavor: 'base64',
                 data: 'Ck4KcTYwOQpRMjAzLDI2CkI1LDI2LDAsMUEsMyw3LDE1MixCLCIxMjM0IgpBMzEwLDI2LDAsMywx' +
-                'LDEsTiwiU0tVIDAwMDAwIE1GRyAwMDAwIgpBMzEwLDU2LDAsMywxLDEsTiwiUVogUFJJTlQgQVBQ' +
-                'TEVUIgpBMzEwLDg2LDAsMywxLDEsTiwiVEVTVCBQUklOVCBTVUNDRVNTRlVMIgpBMzEwLDExNiww' +
-                'LDMsMSwxLE4sIkZST00gU0FNUExFLkhUTUwiCkEzMTAsMTQ2LDAsMywxLDEsTiwiUVpJTkRVU1RS' +
-                'SUVTLkNPTSIKR1cxNTAsMzAwLDMyLDEyOCz/////////6SSSX///////////////////////////' +
-                '//////////6UlUqX////////////////////////////////////8kqkpKP/////////////////' +
-                '//////////////////6JUpJSVf//////////////////////////////////9KpKVVU+////////' +
-                '//////////////////////////8KSSlJJf5/////////////////////////////////9KUqpVU/' +
-                '/7////////////////////////////////9KqUkokf//P///////////////////////////////' +
-                '+VKUqpZP//+P///////////////////////////////ElKUlSf///9f/////////////////////' +
-                '////////+ipSkqin////y/////////////////////////////+lVUpUlX/////r////////////' +
-                '/////////////////qlJKUql/////+n////////////////////////////BFKVKUl//////8v//' +
-                '/////////////////////////zVSlKUp///////0f//////////////////////////wiSlSUpf/' +
-                '//////q///////////////////////////KqlJUpV///////+R//////////////////////////' +
-                '4UlKSpSX///////9T/////////6L///////////////BKlKpSqP///////1X////////0qg/23/V' +
-                'VVVVVVf//8CSlJKklf///////kv///////+pS0/JP8AAAAAAB///wFSlSSpV///////+pf//////' +
-                '/pUoq+qfwAAAAAAH//+AClSqpUT///////9S///////8pJUlkr+AAAAAAA///4AFJSSSUv//////' +
-                '/yl///////KVUpTUv8AAAAAAH///gBKSqlVU////////lX//////6UkqoiU/wAAAAAA///+ABKpJ' +
-                'Uko////////JH//////UpIiqlJ/AAAAAAD///wACkSUpJX///////6q//////6pVVSqiv4AAAAAA' +
-                'f///AAJVVIqpP///////pI//////pSVtSSq/wAAAAAD///8AAJSlVJVf///////Sp/////8Sq//U' +
-                'qL/ttttoAP///wAAUpVSpJ///////+pT/////qkn//UlH/////AB////AABKUSpSX///////5Sn/' +
-                '///+lJ//+pS/////4AP///8AABKUkpVP///////ylP////1Kv//+qr/////AA////4AAKVVJUl//' +
-                '/////+lKf////KS///8kv////8AH////gAAKSSpJR///////9Kq////9Kv///5Kf////gAf///+A' +
-                'AAUlUqov///////1JT////lS////qn////8AD////4AABKpKSqf///////Skj///+kr////JH///' +
-                '/wAf////wAACkqUlK///////8pKv///ypf///9V////+AD/////AAAFKUVSj///////wqlP///JT' +
-                '////yR////wAP////8AAAFKqkpv///////JSlf//9Sv////U/////AB/////4AAAVIpKRf//////' +
-                '+ElV///pS////8of///4AP/////gAAASZVKr///////4qkj///Sn////0v////AA//////AAABUS' +
-                'VJH///////glJn//8pP////KH///8AH/////+AAACtUlVf//////+ClRP//qV////9K////gA///' +
-                '///4AAACEpJK///////8BSqf/+lX////yr///8AD//////wAAAVUqVH///////gUlU//5Rf////R' +
-                'P///gAf//////gAAApKqTP//////8AVSV//pU////6qf//+AD//////+AAAAqkki//////8AEpVL' +
-                '/+qP////1L///wAP//////4AAACSVVB/////+AFUpKX/9KP////Sv//+AB///////AAAAEqSgH//' +
-                '//+ACkpSUv/lV////6k///4AP//////+AAAAUlSgf////gAJKRUpf/ST////1J///AA///////4A' +
-                'AAAVJVB////gAtVFUpV/8lX///+Vf//4AH///////gAAABKSSD///wASSVVJSR/1Vf///8kf//gA' +
-                '///////+AAAABVUof//4AElUpKqqv/SL////1L//8AD///////4AAAABJJQ//8AFVJKVKSSP+qj/' +
-                '///Kv//gAf///////gAAAAKSpT/+ACkqSlKUkqf5Rf///6S//+AD///////+AAAAAKqpP/ABJKVS' +
-                'klKqU/xUf///qp//wAP///////4AAAAAkko+gASVKUlVKlKX/VK///9Sf/+AB////////gAAAACp' +
-                'UrgAKqVKVJKSlKf+Sl///0kf/4AP///////+AAAAABSVIAFJUlKqSUpKV/0pX//8qr//AA//////' +
-                '//8AAAAACklACSopKSVUqVKX/qpH//okv/4AH////////gAAAAAVVKBUpUqUkkpKSk//SSv/xVK/' +
-                '/AAAAAAD////AAAAAAJKWSUpVKVVUqVSp/+qqH9SlR/8AAAAAAH///4AAAAABSUklJSSlJJKUkpf' +
-                '/8klQFSo//gAAAAAA////wAAAAABVKqlUkqlSqkqqU//6pUqkkof8AAAAAAB/r//AAAAAAElEpSK' +
-                'qSlSSpJKL//pUqpVKr/wAAAAAAP8v/8AAAAAAJLKUqkkpSqkqSVf//yUkpKSv+AAAAAAAfqf/wAA' +
-                'AAAAVClKVVUoklUqqp///UpKVVS/wAAAAAAD+S//AAAAAAAlpSkkkpVKkpKSX///JVKTpR+AAAAA' +
-                'AAH9X/8AAAAAABRUpVJUqqSpSUlf///SSk/Sv4AAAAAAA/y//wAAAAAAFSVUlSUkUkpUqr////VS' +
-                'v9S/AAAAAAAB/3//AAAAAAAFUkpSlJMqqUpJP////13/pT////////////8AAAAAAAEpJSlSqUkk' +
-                'pVS////////Un////////////wAAAAAABJVSlSpUqpUpJX///////8q/////////////gAAAAAAC' +
-                'pSqkkpKSUpSSP///////5L////////////+AAAAAAACSkVVKSklKpVV///////+SX///////////' +
-                '/4AAAAAAAFSqJKlSqqiVSX///////9U/////////////gAAAAAAASpVSlSkklVJU////////yr//' +
-                '//////////+AAAAAAAAkpJSklKpKSUp////////kn////////////4AAAAAAABJSqlKqkqUqVf//' +
-                '/////5K/////////////gAAAAAAACpUlKpJKUqlI////////1L////////////+AAAAAAAAFSVKS' +
-                'SqkpFKX////////SX////////////4AAAAAAAAiklKlSSpTKKv///////9U/////////////wAAA' +
-                'AAAABSpSlSqlSiVJ////////pV/////////////AAAAAAAAVUpSkklSlUqX////////Uv///////' +
-                '/////8AAAAAAAAkqUpVJJSqpVf///////8pf////////////4AAAAAAAFJKUpKqUpJUT////////' +
-                '4r/////////////wAAAAAAAKqVKVKUqSSVX///////+Uv/////////////gAAAAAAASUlKSkpKql' +
-                'S////////+qf/////////////AAAAAAAEkpKUlUpJJCn////////iH///////////wAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH/4B+A8AH/AAAAA' +
-                'AAAAAAAAAAAAAA//AAfwD4H4HwAAf/4H4DwB//gAAAAAAAAAAAAAAAAAD/+AB/APgfgfAAB//wfw' +
-                'PAf/+AAAAAAAAAAAAAgAAAAP/8AH8AfB+D4AAH//B/g8D//4AAAAAAAAAAAADwAAAA//4A/4B8H4' +
-                'PgAAfB+H+DwP4HgAAAAAAAAAAAAPwAAAD4fgD/gHw/w+AAB8D4f8PB+AGAAAAAAAAAAAAA/wAAAP' +
-                'g+Af/AfD/D4AAHwPh/48HwAAAAAAAAAAAAAAB/4AAA+D4B98A+P8PAAAfA+Hvjw+AAAAAAAAAAAA' +
-                'AAAB/4AAD4PgH3wD4/x8AAB8H4e/PD4AAAAAAAAAAAAAAAB/8AAPh8A+PgPn/nwAAH//B5+8Pg/4' +
-                'AH/j/x/4/8f+AA/8AA//wD4+A+eefAAAf/4Hj7w+D/gAf+P/H/j/x/4AA/wAD/+APj4B5554AAB/' +
-                '/AeP/D4P+AB/4/8f+P/H/gAD/AAP/wB8HwH3nvgAAH/wB4f8Pw/4AH/j/x/4/8f+AA/8AA//AH//' +
-                'Af+f+AAAfAAHg/wfAPgAAAAAAAAAAAAAf/AAD5+A//+B/w/4AAB8AAeD/B+A+AAAAAAAAAAAAAH/' +
-                'gAAPj8D//4D/D/AAAHwAB4H8H+D4AAAAAAAAAAAAB/4AAA+H4P//gP8P8AAAfAAHgPwP//gAAAAA' +
-                'AAAAAAAP8AAAD4fh+A/A/w/wAAB8AAeA/Af/+AAAAAAAAAAAAA/AAAAPg/HwB8B+B+AAAHwAB4B8' +
-                'Af/4AAAAAAAAAAAADwAAAA+B+fAHwH4H4AAAfAAHgHwAf4AAAAAAAAAAAAAIAAAAD4H/8Afgfgfg' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-                'AAAAAAAAAAAAAAAAAAAAAAAAClAxLDEK'
+                      'LDEsTiwiU0tVIDAwMDAwIE1GRyAwMDAwIgpBMzEwLDU2LDAsMywxLDEsTiwiUVogUFJJTlQgQVBQ' +
+                      'TEVUIgpBMzEwLDg2LDAsMywxLDEsTiwiVEVTVCBQUklOVCBTVUNDRVNTRlVMIgpBMzEwLDExNiww' +
+                      'LDMsMSwxLE4sIkZST00gU0FNUExFLkhUTUwiCkEzMTAsMTQ2LDAsMywxLDEsTiwiUVpJTkRVU1RS' +
+                      'SUVTLkNPTSIKR1cxNTAsMzAwLDMyLDEyOCz/////////6SSSX///////////////////////////' +
+                      '//////////6UlUqX////////////////////////////////////8kqkpKP/////////////////' +
+                      '//////////////////6JUpJSVf//////////////////////////////////9KpKVVU+////////' +
+                      '//////////////////////////8KSSlJJf5/////////////////////////////////9KUqpVU/' +
+                      '/7////////////////////////////////9KqUkokf//P///////////////////////////////' +
+                      '+VKUqpZP//+P///////////////////////////////ElKUlSf///9f/////////////////////' +
+                      '////////+ipSkqin////y/////////////////////////////+lVUpUlX/////r////////////' +
+                      '/////////////////qlJKUql/////+n////////////////////////////BFKVKUl//////8v//' +
+                      '/////////////////////////zVSlKUp///////0f//////////////////////////wiSlSUpf/' +
+                      '//////q///////////////////////////KqlJUpV///////+R//////////////////////////' +
+                      '4UlKSpSX///////9T/////////6L///////////////BKlKpSqP///////1X////////0qg/23/V' +
+                      'VVVVVVf//8CSlJKklf///////kv///////+pS0/JP8AAAAAAB///wFSlSSpV///////+pf//////' +
+                      '/pUoq+qfwAAAAAAH//+AClSqpUT///////9S///////8pJUlkr+AAAAAAA///4AFJSSSUv//////' +
+                      '/yl///////KVUpTUv8AAAAAAH///gBKSqlVU////////lX//////6UkqoiU/wAAAAAA///+ABKpJ' +
+                      'Uko////////JH//////UpIiqlJ/AAAAAAD///wACkSUpJX///////6q//////6pVVSqiv4AAAAAA' +
+                      'f///AAJVVIqpP///////pI//////pSVtSSq/wAAAAAD///8AAJSlVJVf///////Sp/////8Sq//U' +
+                      'qL/ttttoAP///wAAUpVSpJ///////+pT/////qkn//UlH/////AB////AABKUSpSX///////5Sn/' +
+                      '///+lJ//+pS/////4AP///8AABKUkpVP///////ylP////1Kv//+qr/////AA////4AAKVVJUl//' +
+                      '/////+lKf////KS///8kv////8AH////gAAKSSpJR///////9Kq////9Kv///5Kf////gAf///+A' +
+                      'AAUlUqov///////1JT////lS////qn////8AD////4AABKpKSqf///////Skj///+kr////JH///' +
+                      '/wAf////wAACkqUlK///////8pKv///ypf///9V////+AD/////AAAFKUVSj///////wqlP///JT' +
+                      '////yR////wAP////8AAAFKqkpv///////JSlf//9Sv////U/////AB/////4AAAVIpKRf//////' +
+                      '+ElV///pS////8of///4AP/////gAAASZVKr///////4qkj///Sn////0v////AA//////AAABUS' +
+                      'VJH///////glJn//8pP////KH///8AH/////+AAACtUlVf//////+ClRP//qV////9K////gA///' +
+                      '///4AAACEpJK///////8BSqf/+lX////yr///8AD//////wAAAVUqVH///////gUlU//5Rf////R' +
+                      'P///gAf//////gAAApKqTP//////8AVSV//pU////6qf//+AD//////+AAAAqkki//////8AEpVL' +
+                      '/+qP////1L///wAP//////4AAACSVVB/////+AFUpKX/9KP////Sv//+AB///////AAAAEqSgH//' +
+                      '//+ACkpSUv/lV////6k///4AP//////+AAAAUlSgf////gAJKRUpf/ST////1J///AA///////4A' +
+                      'AAAVJVB////gAtVFUpV/8lX///+Vf//4AH///////gAAABKSSD///wASSVVJSR/1Vf///8kf//gA' +
+                      '///////+AAAABVUof//4AElUpKqqv/SL////1L//8AD///////4AAAABJJQ//8AFVJKVKSSP+qj/' +
+                      '///Kv//gAf///////gAAAAKSpT/+ACkqSlKUkqf5Rf///6S//+AD///////+AAAAAKqpP/ABJKVS' +
+                      'klKqU/xUf///qp//wAP///////4AAAAAkko+gASVKUlVKlKX/VK///9Sf/+AB////////gAAAACp' +
+                      'UrgAKqVKVJKSlKf+Sl///0kf/4AP///////+AAAAABSVIAFJUlKqSUpKV/0pX//8qr//AA//////' +
+                      '//8AAAAACklACSopKSVUqVKX/qpH//okv/4AH////////gAAAAAVVKBUpUqUkkpKSk//SSv/xVK/' +
+                      '/AAAAAAD////AAAAAAJKWSUpVKVVUqVSp/+qqH9SlR/8AAAAAAH///4AAAAABSUklJSSlJJKUkpf' +
+                      '/8klQFSo//gAAAAAA////wAAAAABVKqlUkqlSqkqqU//6pUqkkof8AAAAAAB/r//AAAAAAElEpSK' +
+                      'qSlSSpJKL//pUqpVKr/wAAAAAAP8v/8AAAAAAJLKUqkkpSqkqSVf//yUkpKSv+AAAAAAAfqf/wAA' +
+                      'AAAAVClKVVUoklUqqp///UpKVVS/wAAAAAAD+S//AAAAAAAlpSkkkpVKkpKSX///JVKTpR+AAAAA' +
+                      'AAH9X/8AAAAAABRUpVJUqqSpSUlf///SSk/Sv4AAAAAAA/y//wAAAAAAFSVUlSUkUkpUqr////VS' +
+                      'v9S/AAAAAAAB/3//AAAAAAAFUkpSlJMqqUpJP////13/pT////////////8AAAAAAAEpJSlSqUkk' +
+                      'pVS////////Un////////////wAAAAAABJVSlSpUqpUpJX///////8q/////////////gAAAAAAC' +
+                      'pSqkkpKSUpSSP///////5L////////////+AAAAAAACSkVVKSklKpVV///////+SX///////////' +
+                      '/4AAAAAAAFSqJKlSqqiVSX///////9U/////////////gAAAAAAASpVSlSkklVJU////////yr//' +
+                      '//////////+AAAAAAAAkpJSklKpKSUp////////kn////////////4AAAAAAABJSqlKqkqUqVf//' +
+                      '/////5K/////////////gAAAAAAACpUlKpJKUqlI////////1L////////////+AAAAAAAAFSVKS' +
+                      'SqkpFKX////////SX////////////4AAAAAAAAiklKlSSpTKKv///////9U/////////////wAAA' +
+                      'AAAABSpSlSqlSiVJ////////pV/////////////AAAAAAAAVUpSkklSlUqX////////Uv///////' +
+                      '/////8AAAAAAAAkqUpVJJSqpVf///////8pf////////////4AAAAAAAFJKUpKqUpJUT////////' +
+                      '4r/////////////wAAAAAAAKqVKVKUqSSVX///////+Uv/////////////gAAAAAAASUlKSkpKql' +
+                      'S////////+qf/////////////AAAAAAAEkpKUlUpJJCn////////iH///////////wAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH/4B+A8AH/AAAAA' +
+                      'AAAAAAAAAAAAAA//AAfwD4H4HwAAf/4H4DwB//gAAAAAAAAAAAAAAAAAD/+AB/APgfgfAAB//wfw' +
+                      'PAf/+AAAAAAAAAAAAAgAAAAP/8AH8AfB+D4AAH//B/g8D//4AAAAAAAAAAAADwAAAA//4A/4B8H4' +
+                      'PgAAfB+H+DwP4HgAAAAAAAAAAAAPwAAAD4fgD/gHw/w+AAB8D4f8PB+AGAAAAAAAAAAAAA/wAAAP' +
+                      'g+Af/AfD/D4AAHwPh/48HwAAAAAAAAAAAAAAB/4AAA+D4B98A+P8PAAAfA+Hvjw+AAAAAAAAAAAA' +
+                      'AAAB/4AAD4PgH3wD4/x8AAB8H4e/PD4AAAAAAAAAAAAAAAB/8AAPh8A+PgPn/nwAAH//B5+8Pg/4' +
+                      'AH/j/x/4/8f+AA/8AA//wD4+A+eefAAAf/4Hj7w+D/gAf+P/H/j/x/4AA/wAD/+APj4B5554AAB/' +
+                      '/AeP/D4P+AB/4/8f+P/H/gAD/AAP/wB8HwH3nvgAAH/wB4f8Pw/4AH/j/x/4/8f+AA/8AA//AH//' +
+                      'Af+f+AAAfAAHg/wfAPgAAAAAAAAAAAAAf/AAD5+A//+B/w/4AAB8AAeD/B+A+AAAAAAAAAAAAAH/' +
+                      'gAAPj8D//4D/D/AAAHwAB4H8H+D4AAAAAAAAAAAAB/4AAA+H4P//gP8P8AAAfAAHgPwP//gAAAAA' +
+                      'AAAAAAAP8AAAD4fh+A/A/w/wAAB8AAeA/Af/+AAAAAAAAAAAAA/AAAAPg/HwB8B+B+AAAHwAB4B8' +
+                      'Af/4AAAAAAAAAAAADwAAAA+B+fAHwH4H4AAAfAAHgHwAf4AAAAAAAAAAAAAIAAAAD4H/8Afgfgfg' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+                      'AAAAAAAAAAAAAAAAAAAAAAAAClAxLDEK'
             }
         ];
 
         qz.print(config, printData).catch(displayError);
     }
 
+    /* Sample ZPL Only */
     function printXML() {
         var config = getUpdatedConfig();
+        var opts = getUpdatedOptions();
 
         var printData = [
-            { type: 'raw', format: 'xml', data: 'assets/zpl_sample.xml', options: { xmlTag: 'v7:Image' } }
+            { type: 'raw', format: 'command', flavor: 'xml', data: 'assets/zpl_sample.xml', options: opts }
         ];
 
         qz.print(config, printData).catch(displayError);
@@ -1151,29 +1555,157 @@
 
     function printHex() {
         var config = getUpdatedConfig();
+        var lang = getUpdatedOptions().language; //print options not used with this flavor, just check language requested
 
-        var printData = [
-            { type: 'raw', format: 'hex', data: '4e0d0a713630390d0a513230332c32360d0a42352c32362c' },
-            { type: 'raw', format: 'hex', data: '302c31412c332c372c3135322c422c2231323334220d0a41' },
-            { type: 'raw', format: 'hex', data: '3331302c32362c302c332c312c312c4e2c22534b55203030' },
-            { type: 'raw', format: 'hex', data: '303030204d46472030303030220d0a413331302c35362c30' },
-            { type: 'raw', format: 'hex', data: '2c332c312c312c4e2c22515a205072696e7420506c756769' },
-            { type: 'raw', format: 'hex', data: '6e220d0a413331302c38362c302c332c312c312c4e2c2254' },
-            { type: 'raw', format: 'hex', data: '657374207072696e74207375636365737366756c220d0a41' },
-            { type: 'raw', format: 'hex', data: '3331302c3131362c302c332c312c312c4e2c2266726f6d20' },
-            { type: 'raw', format: 'hex', data: '73616d706c652e68746d6c220d0a413331302c3134362c30' },
-            { type: 'raw', format: 'hex', data: '2c332c312c312c4e2c227072696e7448657828292066756e' },
-            { type: 'raw', format: 'hex', data: '6374696f6e2e220d0a50312c310d0a' }
-        ];
+        var printData;
+        switch(lang) {
+            case 'EPL':
+                //defaults to 'type: raw' and 'format: command'
+                printData = [
+                    { flavor: 'hex', data: '4e0d0a713630390d0a513230332c32360d0a42352c32362c3' },
+                    { flavor: 'hex', data: '02c31412c332c372c3135322c422c2239383736220d0a4133' },
+                    { flavor: 'hex', data: '31302c32362c302c332c312c312c4e2c22534b55203030303' },
+                    { flavor: 'hex', data: '030204d46472030303030220d0a413331302c35362c302c33' },
+                    { flavor: 'hex', data: '2c312c312c4e2c2254455354205052494e542053554343455' },
+                    { flavor: 'hex', data: '35346554c220d0a413331302c38362c302c332c312c312c4e' },
+                    { flavor: 'hex', data: '2c225553494e472068657820434f4d4d414e4453220d0a413' },
+                    { flavor: 'hex', data: '331302c3131362c302c332c312c312c4e2c225052494e5445' },
+                    { flavor: 'hex', data: '44205749544820515a2054524159220d0a50312c31' }
+                ];
+                break;
+            case 'ZPL':
+                printData = [
+                    { flavor: 'hex', data: '5e58410d0a5e464f35302c35300d0a5e41444e2c33362c3' },
+                    { flavor: 'hex', data: '2300d0a5e46445052494e544544205749544820515a2054' },
+                    { flavor: 'hex', data: '5241590d0a5e46445553494e472068657820434f4d4d414' },
+                    { flavor: 'hex', data: 'e44530d0a5e46530d0a5e585a' }
+                ];
+                break;
+            case 'ESCP':
+                printData = [
+                    { flavor: 'hex', data: '0d0a5052494e544544205749544820515a20545241590d0a0d0a' },
+                    { flavor: 'hex', data: '5553494e472068657820434f4d4d414e44530d0a0d0a0d0a0d0a' }
+                ];
+                break;
+            default:
+                displayError("Sample page cannot print hex commands using this printer language");
+                break;
+        }
+
+
+        qz.print(config, printData).catch(displayError);
+    }
+
+    function printRawImage() {
+        var config = getUpdatedConfig();
+        var opts = getUpdatedOptions();
+
+        var printData;
+        switch(opts.language) {
+            case 'EPL':
+                printData = [
+                    '\nN\n',
+                    { type: 'raw', format: 'image', flavor: 'file', data: 'assets/img/image_sample_bw.png', options: opts },
+                    '\nP1,1\n'
+                ];
+                break;
+            case 'ZPL':
+                printData = [
+                    '^XA\n',
+                    { type: 'raw', format: 'image', flavor: 'file', data: 'assets/img/image_sample_bw.png', options: opts },
+                    '^XZ\n'
+                ];
+                break;
+            case 'ESCP':
+                printData = [
+                    //defaults to 'flavor: file'
+                    { type: 'raw', format: 'image', data: 'assets/img/image_sample_bw.png', options: opts },
+                ];
+                break;
+            default:
+                displayError("Cannot print images using this printer language");
+                return;
+        }
+
+        qz.print(config, printData).catch(displayError);
+    }
+
+    function printRawPDF() {
+        var config = getUpdatedConfig();
+        var opts = getUpdatedOptions();
+
+        var printData;
+        switch(opts.language) {
+            case 'EPL':
+                printData = [
+                    '\nN\n',
+                    'q609\n',
+                    'Q203,26\n',
+                    { type: 'raw', format: 'pdf', flavor: 'file', data: 'assets/pdf_sample.pdf', options: opts },
+                    '\nP1,1\n'
+                ];
+                break;
+            case 'ZPL':
+                printData = [
+                    '^XA\n',
+                    { type: 'raw', format: 'pdf', flavor: 'file', data: 'assets/pdf_sample.pdf', options: opts },
+                    '^XZ\n'
+                ];
+                break;
+            case 'ESCP':
+                printData = [
+                    { type: 'raw', format: 'pdf', flavor: 'file', data: 'assets/pdf_sample.pdf', options: opts }
+                ];
+                break;
+            default:
+                displayError("Cannot print PDFs using this printer language");
+                break;
+        }
+
+        qz.print(config, printData).catch(displayError);
+    }
+
+    function printRawHTML() {
+        var config = getUpdatedConfig();
+        var opts = getUpdatedOptions();
+
+        var printData;
+        switch(opts.language) {
+            case 'EPL':
+                printData = [
+                    '\nN\n',
+                    'q609\n',
+                    'Q203,26\n',
+                    { type: 'raw', format: 'html', flavor: 'file', data: 'https://qz.io/about/', options: opts },
+                    '\nP1,1\n'
+                ];
+                break;
+            case 'ZPL':
+                printData = [
+                    '^XA\n',
+                    { type: 'raw', format: 'html', flavor: 'file', data: 'https://qz.io/about/', options: opts },
+                    '^XZ\n'
+                ];
+                break;
+            case 'ESCP':
+                printData = [
+                    { type: 'raw', format: 'html', flavor: 'file', data: 'https://qz.io/about/', options: opts }
+                ];
+                break;
+            default:
+                displayError("Cannot print HTML using this printer language");
+                break;
+        }
 
         qz.print(config, printData).catch(displayError);
     }
 
     function printFile(file) {
         var config = getUpdatedConfig();
+        //print options not used with this flavor
 
         var printData = [
-            { type: 'raw', format: 'file', data: 'assets/' + file }
+            { type: 'raw', format: 'command', flavor: 'file', data: 'assets/' + file }
         ];
 
         qz.print(config, printData).catch(displayError);
@@ -1182,25 +1714,31 @@
 
     /// Pixel Printers ///
     function printHTML() {
-        var config = getUpdatedConfig();
-
-        var colA = '<h2>*&nbsp; QZ Print Plugin HTML Printing &nbsp;*</h2>' +
-                '<span style="color: #F00;">Version:</span> ' + qzVersion + '<br/>' +
-                '<span style="color: #F00;">Visit:</span> https://qz.io/';
-        var colB = '<img src="' + getPath() + '/assets/img/image_sample.png">';
+        var config = getUpdatedConfig({ 'pxlScale': false });
+        var opts = getUpdatedOptions(true);
 
         var printData = [
             {
-                type: 'html',
-                format: 'plain',
+                type: 'pixel',
+                format: 'html',
+                flavor: 'plain',
                 data: '<html>' +
-                '   <table style="font-family: monospace; border: 1px;">' +
-                '       <tr style="height: 6cm;">' +
-                '           <td valign="top">' + colA + '</td>' +
-                '           <td valign="top">' + colB + '</td>' +
-                '       </tr>' +
-                '   </table>' +
-                '</html>'
+                      '<body>' +
+                      '  <table style="font-family: monospace; width: 100%">' +
+                      '    <tr>' +
+                      '      <td>' +
+                      '        <h2>* QZ Tray HTML Sample Print *</h2>' +
+                      '        <span style="color: #D00;">Version:</span> ' + qzVersion + '<br/>' +
+                      '        <span style="color: #D00;">Source:</span> https://qz.io/' +
+                      '      </td>' +
+                      '      <td align="right">' +
+                      '        <img src="' + getPath() + '/assets/img/image_sample.png" />' +
+                      '      </td>' +
+                      '    </tr>' +
+                      '  </table>' +
+                      '</body>' +
+                      '</html>',
+                options: opts
             }
         ];
 
@@ -1209,9 +1747,10 @@
 
     function printPDF() {
         var config = getUpdatedConfig();
+        var opts = getUpdatedOptions(true);
 
         var printData = [
-            { type: 'pdf', data: 'assets/pdf_sample.pdf' }
+            { type: 'pixel', format: 'pdf', flavor: 'file', data: 'assets/pdf_sample.pdf', options: opts }
         ];
 
         qz.print(config, printData).catch(displayError);
@@ -1219,9 +1758,12 @@
 
     function printImage() {
         var config = getUpdatedConfig();
+        //print options not used with this flavor
 
         var printData = [
-            { type: 'image', data: 'assets/img/image_sample.png' }
+            { type: 'pixel', format: 'image', flavor: 'file', data: 'assets/img/image_sample.png' }
+            //also valid, as format and flavor will default to proper values:
+//             { type: 'pixel', data: 'assets/img/image_sample.png' }
         ];
 
         qz.print(config, printData).catch(displayError);
@@ -1241,27 +1783,24 @@
     }
 
     function openSerialPort() {
-        var widthVal = $("#serialWidth").val();
-        if (!widthVal) { widthVal = null; }
+        var options = getSerialOptions();
 
-        var properties = {
-            start: $("#serialStart").val(),
-            end: $("#serialEnd").val(),
-            width: widthVal,
-            baudRate: $("#serialBaud").val(),
-            dataBits: $("#serialData").val(),
-            stopBits: $("#serialStop").val(),
-            parity: $("#serialParity").val(),
-            flowControl: $("#serialFlow").val()
-        };
-
-        qz.serial.openPort($("#serialPort").val(), properties).then(function() {
+        qz.serial.openPort($("#serialPort").val(), options).then(function() {
             displayMessage("Serial port opened");
         }).catch(displayError);
     }
 
     function sendSerialData() {
-        qz.serial.sendData($("#serialPort").val(), $("#serialCmd").val()).catch(displayError);
+        var options = getSerialOptions();
+
+        var serialData = {
+            type: $("input[name='serialType']:checked").val(),
+            data: $("#serialCmd").val()
+        };
+        //allow some escape characters
+        serialData.data = serialData.data.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t");
+
+        qz.serial.sendData($("#serialPort").val(), serialData, options).catch(displayError);
     }
 
     function closeSerialPort() {
@@ -1280,9 +1819,9 @@
                 if (device.hub) { list += "USB Hub"; }
 
                 list += "<p>" +
-                    "   VendorID: <code>0x" + device.vendorId + "</code>" +
-                    usbButton(["usbVendor", "usbProduct"], [device.vendorId, device.productId]) + "<br/>" +
-                    "   ProductID: <code>0x" + device.productId + "</code><br/>";
+                        "   VendorID: <code>0x" + device.vendorId + "</code>" +
+                        usbButton(["usbVendor", "usbProduct"], [device.vendorId, device.productId]) + "<br/>" +
+                        "   ProductID: <code>0x" + device.productId + "</code><br/>";
 
                 if (device.manufacturer) { list += "   Manufacturer: <code>" + device.manufacturer + "</code><br/>"; }
                 if (device.product) { list += "   Product: <code>" + device.product + "</code><br/>"; }
@@ -1411,15 +1950,15 @@
                 var device = data[i];
 
                 list += "<p>" +
-                    "   VendorID: <code>0x" + device.vendorId + "</code>" +
-                    usbButton(["hidVendor", "hidProduct", "hidUsagePage", "hidSerial"],
-                              [device.vendorId, device.productId, device.usagePage, device.serial]) + "<br/>" +
-                    "   ProductID: <code>0x" + device.productId + "</code><br/>" +
-                    (device.usagePage ? "   Usage Page: <code>0x" + device.usagePage + "</code><br/>" : "") +
-                    (device.serial ? "   Serial: <code>" + device.serial + "</code><br/>" : "") +
-                    (device.manufacturer ? "   Manufacturer: <code>" + device.manufacturer + "</code><br/>" : "") +
-                    (device.product ? "   Product: <code>" + device.product + "</code><br/>" : "") +
-                    "</p><hr/>";
+                        "   VendorID: <code>0x" + device.vendorId + "</code>" +
+                        usbButton(["hidVendor", "hidProduct", "hidUsagePage", "hidSerial"],
+                                  [device.vendorId, device.productId, device.usagePage, device.serial]) + "<br/>" +
+                        "   ProductID: <code>0x" + device.productId + "</code><br/>" +
+                        (device.usagePage ? "   Usage Page: <code>0x" + device.usagePage + "</code><br/>" : "") +
+                        (device.serial ? "   Serial: <code>" + device.serial + "</code><br/>" : "") +
+                        (device.manufacturer ? "   Manufacturer: <code>" + device.manufacturer + "</code><br/>" : "") +
+                        (device.product ? "   Product: <code>" + device.product + "</code><br/>" : "") +
+                        "</p><hr/>";
             }
 
             pinMessage("<strong>Available hid devices:</strong><br/>" + list);
@@ -1526,16 +2065,146 @@
     }
 
 
+    /// Status ///
+    function startPrintersListen(printerName) {
+        if (printerName === "NONE") {
+            return displayMessage("Please search for a valid printer first", "alert-warning");
+        }
+        qz.printers.stopListening().then(function() {
+            clearPrintersLog();
+            return qz.printers.startListening(printerName);
+        }).then(function() {
+            displayMessage("Started listening for " + (printerName ? printerName : "all") + " printer events");
+        }).catch(displayError);
+    }
+
+    function getPrintersStatus() {
+        qz.printers.getStatus().then(function() {
+            displayMessage("Requesting all printer statuses for listened printers");
+        }).catch(displayError);
+    }
+
+    function stopPrintersListen() {
+        qz.printers.stopListening().then(function() {
+            displayMessage("Stopped listening for printer events");
+            clearPrintersLog();
+        }).catch(displayError);
+    }
+
+
+    /// File ///
+    function listFiles() {
+        var params = {
+            sandbox: $("#fileSandbox").prop("checked"),
+            shared: $("#fileShared").prop("checked")
+        };
+
+        qz.file.list($("#fileLocation").val(), params).then(function(data) {
+            var files = "";
+            for(var n = 0; n < data.length; n++) {
+                files += data[n] + "\n";
+            }
+            displayMessage("File listing <strong><code>" + $("#fileLocation").val() + "</code></strong><pre>" + files + "</pre>", null, 15000);
+        }).catch(displayError);
+    }
+
+    function readFile() {
+        var params = {
+            sandbox: $("#fileSandbox").prop("checked"),
+            shared: $("#fileShared").prop("checked")
+        };
+
+        qz.file.read($("#fileLocation").val(), params).then(function(data) {
+            displayMessage("Contents of <strong><code>" + $("#fileLocation").val() + "</code></strong><pre>" + data + "</pre>", null, 15000);
+        }).catch(displayError);
+    }
+
+    function writeFile() {
+        var params = {
+            sandbox: $("#fileSandbox").prop("checked"),
+            shared: $("#fileShared").prop("checked"),
+            append: $("#fileAppend").prop('checked'),
+            data: $("#fileData").val()
+        };
+
+        qz.file.write($("#fileLocation").val(), params).then(function() {
+            displayMessage("File <strong><code>" + $("#fileLocation").val() + "</code></strong> written successfully");
+        }).catch(displayError);
+    }
+
+    function deleteFile() {
+        var params = {
+            sandbox: $("#fileSandbox").prop("checked"),
+            shared: $("#fileShared").prop("checked")
+        };
+
+        qz.file.remove($("#fileLocation").val(), params).then(function() {
+            displayMessage("File <strong><code>" + $("#fileLocation").val() + "</code></strong> deleted");
+        }).catch(displayError);
+    }
+
+    function startFileListen() {
+        var params = {
+            sandbox: $("#fileSandbox").prop("checked"),
+            shared: $("#fileShared").prop("checked"),
+            listener: {}
+        };
+
+        if (isChecked($("#fileListenerData"))) {
+            params.listener.reverse = !!$("#fileDirEnd").prop("checked"); //else fileStartRadio checked
+
+            var len = $("#fileLength").val();
+            if (!!$("#fileTruncateLines").prop("checked")) { //else fileTruncateBytes checked
+                params.listener.lines = len;
+            } else {
+                params.listener.bytes = len;
+            }
+        }
+
+        qz.file.startListening($("#fileLocation").val(), params).then(function() {
+            displayMessage("Started listening for <strong><code>" + ($("#fileLocation").val() || "./") + "</code></strong> events");
+        }).catch(displayError);
+    }
+
+    function stopFileListen() {
+        var params = {
+            sandbox: $("#fileSandbox").prop("checked"),
+            shared: $("#fileShared").prop("checked")
+        };
+
+        qz.file.stopListening($("#fileLocation").val(), params).then(function() {
+            displayMessage("Stopped listening for <strong><code>" + ($("#fileLocation").val() || "./") + "</code></strong> events");
+        }).catch(displayError);
+    }
+
+    function stopAllFileListeners() {
+        qz.file.stopListening().then(function() {
+            displayMessage("Stopped listening for <strong>all</strong> file events");
+        }).catch(displayError);
+    }
+
+
     /// Resets ///
     function resetRawOptions() {
+        //config
         $("#rawPerSpool").val(1);
         $("#rawEncoding").val(null);
         $("#rawEndOfDoc").val(null);
         $("#rawAltPrinting").prop('checked', false);
         $("#rawCopies").val(1);
+
+        //printer
+        $("#pLangEPL").prop('checked', true);
+        $("#pX").val('0');
+        $("#pY").val('0');
+        $("#pDotDensity").val('single');
+        $("#pXml").val('v7:Image');
+        $("#pRawWidth").val('480');
+        $("#pRawHeight").val('');
     }
 
     function resetPixelOptions() {
+        //config
         $("#pxlColorType").val("color");
         $("#pxlCopies").val(1);
         $("#pxlDensity").val('');
@@ -1546,7 +2215,7 @@
         $("#pxlOrientation").val("");
         $("#pxlPaperThickness").val(null);
         $("#pxlPrinterTray").val(null);
-        $("#pxlRasterize").prop('checked', true);
+        $("#pxlRasterize").prop('checked', false);
         $("#pxlRotation").val(0);
         $("#pxlScale").prop('checked', true);
         $("#pxlUnitsIN").prop('checked', true);
@@ -1563,37 +2232,38 @@
         $("#pxlSizeHeight").val('');
         $("#pxlSizeActive").prop('checked', false);
         $("#pxlSizeGroup").css('display', 'none');
-    }
 
-    function checkSizeActive() {
-        if ($("#pxlSizeActive").prop('checked')) {
-            $("#pxlSizeGroup").css('display', '');
-        } else {
-            $("#pxlSizeGroup").css('display', 'none');
-        }
-    }
+        //printer
+        $("#pPxlWidth").val('');
+        $("#pPxlHeight").val('');
 
-    function checkMarginsActive() {
-        if ($("#pxlMarginsActive").prop('checked')) {
-            $("#pxlMarginsGroup").css('display', '');
-            $("#pxlMargins").css('display', 'none');
-        } else {
-            $("#pxlMarginsGroup").css('display', 'none');
-            $("#pxlMargins").css('display', '');
-        }
+        $("#pxlContent").find(".dirty").removeClass("dirty");
     }
 
     function resetSerialOptions() {
         $("#serialPort").val('');
-        $("#serialCmd").val('');
-        $("#serialStart").val("0x0002"); //String.fromCharCode(2)
-        $("#serialEnd").val("0x000D"); //String.fromCharCode(13)
-
         $("#serialBaud").val(9600);
         $("#serialData").val(8);
         $("#serialStop").val(1);
         $("#serialParity").val('NONE');
         $("#serialFlow").val('NONE');
+
+        $("#serialCmd").val('');
+        $("#serialPlainRadio").prop('checked', true);
+        $("#serialEncoding").val("UTF-8");
+
+        $("#serialStart").val('');
+        $("#serialEnd").val('');
+        $("#serialWidth").val('');
+        $("#serialHeader").prop('checked', false);
+        $("#serialRespEncoding").val('');
+        $("#serialLenIndex").val('0');
+        $("#serialLenLength").val('1');
+        $("#serialLenEndianBig").prop('checked', true);
+        $("#serialLengthGroup").css('display', 'none');
+        $("#serialCrcIndex").val('0');
+        $("#serialCrcLength").val('1');
+        $("#serialCrcGroup").css('display', 'none');
 
         // M/T PS60 - 9600, 7, 1, EVEN, NONE
     }
@@ -1626,6 +2296,23 @@
         $("#hidStream").val(100);
     }
 
+    function clearPrintersLog() {
+        $("#printersLog").html("");
+    }
+
+    function resetFileOptions() {
+        $("#fileLocation").val('');
+        $("#fileData").val('');
+        $("#fileShared").prop('checked', true);
+        $("#fileSandbox").prop('checked', true);
+        $("#fileAppend").prop('checked', false);
+
+        $("#fileListenerData").prop('checked', true);
+        $("#fileDirEnd").prop('checked', true);
+        $("#fileTruncateLines").prop('checked', true);
+        $("#fileLength").val('10');
+    }
+
 
     /// Page load ///
     $(document).ready(function() {
@@ -1636,6 +2323,7 @@
         resetSerialOptions();
         resetUsbOptions();
         resetHidOptions();
+        resetFileOptions();
 
         startConnection();
 
@@ -1646,7 +2334,13 @@
             }
         });
 
-        $('a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
+        $("#fileButton").on('change', function(e) {
+            if (this.files && this.files[0]) {
+                $("#fileLocation").val(this.files[0]['name']);
+            }
+        });
+
+        $('a[data-toggle="tab"]').on('shown.bs.tab', function() {
             if (window.readingWeight) {
                 $("#usbWeightRadio").click();
                 $("#hidWeightRadio").click();
@@ -1682,7 +2376,6 @@
         } else {
             console.log(streamEvent.exception);
             displayMessage("Received an error from serial port [" + streamEvent.portName + "]: <em>" + streamEvent.exception + "</em>", 'alert-error');
-
         }
     });
 
@@ -1731,6 +2424,26 @@
         }
     });
 
+    qz.printers.setPrinterCallbacks(function(streamEvent) {
+        addPrintersLog(streamEvent.message, streamEvent.severity);
+    });
+
+    qz.file.setFileCallbacks(function(streamEvent) {
+        if (streamEvent.type !== 'ERROR') {
+            var text = "<h5>File IO Event</h5>" +
+                       "<strong>File:</strong> <code>" + streamEvent.file + "</code><br/>" +
+                       "<strong>Event:</strong><code>" + streamEvent.eventType + "</code><br/>";
+
+            if (streamEvent.fileData) {
+                text += "<strong>Data:</strong><br/><pre>" + streamEvent.fileData.replace(/\r?\n/g, "<br/>") + "</pre>";
+            }
+
+            displayMessage(text);
+        } else {
+            displayError("<strong>Error:</strong> " + streamEvent.message);
+        }
+    });
+
     var qzVersion = 0;
     function findVersion() {
         qz.api.getVersion().then(function(data) {
@@ -1744,6 +2457,11 @@
     });
     $("#askHostModal").on("shown.bs.modal", function() {
         $("#askHost").focus().select();
+    });
+
+    //make dirty when changed
+    $("input[type=checkbox]").on('click', function() {
+        $(this).addClass("dirty");
     });
 
 
@@ -1768,25 +2486,45 @@
         displayMessage(err, 'alert-danger');
     }
 
-    function displayMessage(msg, css) {
+    function displayMessage(msg, css, time) {
         if (css == undefined) { css = 'alert-info'; }
 
-        var timeout = setTimeout(function() { $('#' + timeout).alert('close'); }, 5000);
+        var timeout = setTimeout(function() { $('#' + timeout).alert('close'); }, time ? time : 5000);
 
         var alert = $("<div/>").addClass('alert alert-dismissible fade in ' + css)
-                .css('max-height', '20em').css('overflow', 'auto')
-                .attr('id', timeout).attr('role', 'alert');
+            .css('max-height', '20em').css('overflow', 'auto')
+            .attr('id', timeout).attr('role', 'alert');
         alert.html("<button type='button' class='close' data-dismiss='alert'>&times;</button>" + msg);
 
         $("#qz-alert").append(alert);
+    }
+
+    //checkId = toggle checkbox, groupId = group/element to show, toggleId = group/element to hide
+    function checkGroupActive(checkId, groupId, toggleId) {
+        if (isChecked($("#"+ checkId))) {
+            $("#"+ groupId).css('display', '');
+            if (toggleId) { $("#"+ toggleId).css('display', 'none'); }
+        } else {
+            $("#"+ groupId).css('display', 'none');
+            if (toggleId) { $("#"+ toggleId).css('display', ''); }
+        }
+    }
+
+    function addPrintersLog(msg, color) {
+        if (color == undefined) { color = ""; }
+
+        msg = '<div class="' + color + '">' + new Date().toString() + ": " + msg + "</div>";
+
+        var $log = $("#printersLog");
+        $log.html($log.html() + msg);
     }
 
     function pinMessage(msg, id, css) {
         if (css == undefined) { css = 'alert-info'; }
 
         var alert = $("<div/>").addClass('alert alert-dismissible fade in ' + css)
-                .css('max-height', '20em').css('overflow', 'auto').attr('role', 'alert')
-                .html("<button type='button' class='close' data-dismiss='alert'>&times;</button>");
+            .css('max-height', '20em').css('overflow', 'auto').attr('role', 'alert')
+            .html("<button type='button' class='close' data-dismiss='alert'>&times;</button>");
 
         var text = $("<div/>").html(msg);
         if (id != undefined) { text.attr('id', id); }
@@ -1812,6 +2550,17 @@
         return path.substring(0, path.lastIndexOf("/"));
     }
 
+    function isChecked(checkElm, ifClean) {
+        if (ifClean !== undefined && !checkElm.hasClass("dirty")) {
+            var lbl = checkElm.siblings("label").text();
+            displayMessage("Forced " + lbl + " " + ifClean + ".", 'alert-warning');
+
+            return ifClean;
+        }
+
+        return checkElm.prop("checked");
+    }
+
     function usbButton(ids, data) {
         var click = "";
         for(var i = 0; i < ids.length; i++) {
@@ -1823,7 +2572,7 @@
 
     function serialButton(serialPort, data) {
         var click = "";
-        for(var i = 0; i < serialPort.length; i++ ) {
+        for(var i = 0; i < serialPort.length; i++) {
             click += "$('#" + serialPort[i] + "').val('" + data[i] + "');$('#" + serialPort[i] + "').fadeOut(300).fadeIn(500);";
         }
         return '<button class="btn btn-default btn-xs" onclick="' + click + '" data-dismiss="alert">Use This</button>';
@@ -1904,18 +2653,18 @@
 
     /// QZ Config ///
     var cfg = null;
-    function getUpdatedConfig() {
+    function getUpdatedConfig(cleanConditions) {
         if (cfg == null) {
             cfg = qz.configs.create(null);
         }
 
-        updateConfig();
+        updateConfig(cleanConditions || {});
         return cfg
     }
 
-    function updateConfig() {
+    function updateConfig(cleanConditions) {
         var pxlSize = null;
-        if ($("#pxlSizeActive").prop('checked')) {
+        if (isChecked($("#pxlSizeActive"), cleanConditions['pxlSizeActive'])) {
             pxlSize = {
                 width: $("#pxlSizeWidth").val(),
                 height: $("#pxlSizeHeight").val()
@@ -1923,7 +2672,7 @@
         }
 
         var pxlMargins = $("#pxlMargins").val();
-        if ($("#pxlMarginsActive").prop('checked')) {
+        if (isChecked($("#pxlMarginsActive"), cleanConditions['pxlMarginsActive'])) {
             pxlMargins = {
                 top: $("#pxlMarginsTop").val(),
                 right: $("#pxlMarginsRight").val(),
@@ -1943,7 +2692,7 @@
         }
 
         cfg.reconfigure({
-                            altPrinting: $("#rawAltPrinting").prop('checked'),
+                            altPrinting: isChecked($("#rawAltPrinting"), cleanConditions['rawAltPrinting']),
                             encoding: $("#rawEncoding").val(),
                             endOfDoc: $("#rawEndOfDoc").val(),
                             perSpool: $("#rawPerSpool").val(),
@@ -1951,20 +2700,73 @@
                             colorType: $("#pxlColorType").val(),
                             copies: copies,
                             density: $("#pxlDensity").val(),
-		            duplex: $("#pxlDuplex").prop('checked'),
+                            duplex: isChecked($("#pxlDuplex"), cleanConditions['pxlDuplex']),
                             interpolation: $("#pxlInterpolation").val(),
                             jobName: jobName,
-                            legacy: $("#pxlLegacy").prop('checked'),
                             margins: pxlMargins,
                             orientation: $("#pxlOrientation").val(),
                             paperThickness: $("#pxlPaperThickness").val(),
                             printerTray: $("#pxlPrinterTray").val(),
-                            rasterize: $("#pxlRasterize").prop('checked'),
+                            rasterize: isChecked($("#pxlRasterize"), cleanConditions['pxlRasterize']),
                             rotation: $("#pxlRotation").val(),
-                            scaleContent: $("#pxlScale").prop('checked'),
+                            scaleContent: isChecked($("#pxlScale"), cleanConditions['pxlScale']),
                             size: pxlSize,
                             units: $("input[name='pxlUnits']:checked").val()
                         });
+    }
+
+    function getUpdatedOptions(onlyPixel) {
+        if (onlyPixel) {
+            return {
+                pageWidth: $("#pPxlWidth").val(),
+                pageHeight: $("#pPxlHeight").val()
+            };
+        } else {
+            return {
+                language: $("input[name='pLanguage']:checked").val(),
+                x: $("#pX").val(),
+                y: $("#pY").val(),
+                dotDensity: $("#pDotDensity").val(),
+                xmlTag: $("#pXml").val(),
+                pageWidth: $("#pRawWidth").val(),
+                pageHeight: $("#pRawHeight").val()
+            };
+        }
+    }
+
+    function getSerialOptions() {
+        var options = {
+            baudRate: $("#serialBaud").val(),
+            dataBits: $("#serialData").val(),
+            stopBits: $("#serialStop").val(),
+            parity: $("#serialParity").val(),
+            flowControl: $("#serialFlow").val(),
+            encoding: $("#serialEncoding").val(),
+            rx: {
+                start: $("#serialStart").val(),
+                end: $("#serialEnd").val() || null,
+                width: $("#serialWidth").val() || null,
+                lengthBytes: null,
+                crcBytes: null,
+                includeHeader: $("#serialHeader").prop('checked'),
+                encoding: $("#serialRespEncoding").val()
+            }
+        };
+        if (isChecked($("#serialLengthActive"))) {
+            options.rx.lengthBytes = {
+                index: $("#serialLenIndex").val(),
+                length: $("#serialLenLength").val(),
+                endian: $("input[name='serialLenEndian']:checked").val()
+            };
+        }
+        if (isChecked($("#serialCrcActive"))) {
+            options.rx.crcBytes = {
+                index: $("#serialCrcIndex").val(),
+                length: $("#serialCrcLength").val()
+            };
+        }
+
+        return options;
     }
 
     function setPrintFile() {

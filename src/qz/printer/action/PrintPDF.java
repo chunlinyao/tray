@@ -1,7 +1,7 @@
 package qz.printer.action;
 
 import com.github.zafarkhaja.semver.Version;
-import net.sourceforge.iharder.Base64;
+import org.apache.commons.ssl.Base64;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -20,18 +20,20 @@ import qz.printer.BookBundle;
 import qz.printer.PDFWrapper;
 import qz.printer.PrintOptions;
 import qz.printer.PrintOutput;
+import qz.utils.ConnectionUtilities;
 import qz.utils.PrintingUtilities;
 import qz.utils.SystemUtilities;
 
 import javax.print.attribute.PrintRequestAttributeSet;
 import java.awt.*;
+import javax.print.attribute.standard.Media;
+import javax.print.attribute.standard.MediaPrintableArea;
 import java.awt.geom.AffineTransform;
 import java.awt.print.PageFormat;
 import java.awt.print.Paper;
 import java.awt.print.PrinterException;
 import java.awt.print.PrinterJob;
 import java.io.*;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -44,6 +46,9 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
     private List<PDDocument> printables;
     private Splitter splitter = new Splitter();
 
+    private double docWidth = 0;
+    private double docHeight = 0;
+
 
     public PrintPDF() {
         originals = new ArrayList<>();
@@ -51,8 +56,8 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
     }
 
     @Override
-    public PrintingUtilities.Type getType() {
-        return PrintingUtilities.Type.PDF;
+    public PrintingUtilities.Format getFormat() {
+        return PrintingUtilities.Format.PDF;
     }
 
     @Override
@@ -60,14 +65,25 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
         for(int i = 0; i < printData.length(); i++) {
             JSONObject data = printData.getJSONObject(i);
 
-            PrintingUtilities.Format format = PrintingUtilities.Format.valueOf(data.optString("format", "FILE").toUpperCase(Locale.ENGLISH));
+            if (!data.isNull("options")) {
+                JSONObject dataOpt = data.getJSONObject("options");
+
+                if (!dataOpt.isNull("pageWidth") && dataOpt.optDouble("pageWidth") > 0) {
+                    docWidth = dataOpt.optDouble("pageWidth") * (72.0 / options.getPixelOptions().getUnits().as1Inch());
+                }
+                if (!dataOpt.isNull("pageHeight") && dataOpt.optDouble("pageHeight") > 0) {
+                    docHeight = dataOpt.optDouble("pageHeight") * (72.0 / options.getPixelOptions().getUnits().as1Inch());
+                }
+            }
+
+            PrintingUtilities.Flavor flavor = PrintingUtilities.Flavor.valueOf(data.optString("flavor", "FILE").toUpperCase(Locale.ENGLISH));
 
             try {
                 PDDocument doc;
-                if (format == PrintingUtilities.Format.BASE64) {
-                    doc = PDDocument.load(new ByteArrayInputStream(Base64.decode(data.getString("data"))));
+                if (flavor == PrintingUtilities.Flavor.BASE64) {
+                    doc = PDDocument.load(new ByteArrayInputStream(Base64.decodeBase64(data.getString("data"))));
                 } else {
-                    doc = PDDocument.load(new URL(data.getString("data")).openStream());
+                    doc = PDDocument.load(ConnectionUtilities.getInputStream(data.getString("data")));
                 }
 
                 originals.add(doc);
@@ -77,7 +93,7 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                 throw new UnsupportedOperationException("PDF file specified could not be found.", e);
             }
             catch(IOException e) {
-                throw new UnsupportedOperationException(String.format("Cannot parse (%s)%s as a PDF file", format, data.getString("data")), e);
+                throw new UnsupportedOperationException(String.format("Cannot parse (%s)%s as a PDF file: %s", flavor, data.getString("data"), e.getLocalizedMessage()), e);
             }
         }
 
@@ -85,13 +101,13 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
     }
 
     @Override
-    public PrintRequestAttributeSet applyDefaultSettings(PrintOptions.Pixel pxlOpts, PageFormat page) {
+    public PrintRequestAttributeSet applyDefaultSettings(PrintOptions.Pixel pxlOpts, PageFormat page, Media[] supported) {
         if (pxlOpts.getOrientation() != null) {
             //page orient does not set properly on pdfs with orientation requested attribute
-            page.setOrientation(pxlOpts.getOrientation().getAsFormat());
+            page.setOrientation(pxlOpts.getOrientation().getAsOrientFormat());
         }
 
-        return super.applyDefaultSettings(pxlOpts, page);
+        return super.applyDefaultSettings(pxlOpts, page, supported);
     }
 
     @Override
@@ -105,7 +121,9 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
         job.setPrintService(output.getPrintService());
 
         PrintOptions.Pixel pxlOpts = options.getPixelOptions();
-        PrintRequestAttributeSet attributes = applyDefaultSettings(pxlOpts, job.getPageFormat(null));
+        Scaling scale = (pxlOpts.isScaleContent()? Scaling.SCALE_TO_FIT:Scaling.ACTUAL_SIZE);
+
+        PrintRequestAttributeSet attributes = applyDefaultSettings(pxlOpts, job.getPageFormat(null), (Media[])output.getPrintService().getSupportedAttributeValues(Media.class, null, null));
 
         // Disable attributes per https://github.com/qzind/tray/issues/174
         if (SystemUtilities.isMac() && Constants.JAVA_VERSION.compareWithBuildsTo(Version.valueOf("1.8.0+202")) < 0) {
@@ -113,14 +131,40 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
             attributes.clear();
         }
 
-        Scaling scale = (pxlOpts.isScaleContent()? Scaling.SCALE_TO_FIT:Scaling.ACTUAL_SIZE);
         RenderingHints hints = new RenderingHints(buildRenderingHints(pxlOpts.getDithering(), pxlOpts.getInterpolation()));
+        double useDensity = pxlOpts.getDensity();
+
+        if (!pxlOpts.isRasterize()) {
+            if (pxlOpts.getDensity() > 0) {
+                //rasterization is automatically performed upon supplying a density, warn user if they aren't expecting this
+                log.warn("Supplying a print density for PDF printing rasterizes the document.");
+            } else if (SystemUtilities.isMac()) {
+                log.warn("OSX systems cannot print vector PDF's, forcing raster to prevent crash.");
+                useDensity = options.getDefaultOptions().getDensity();
+            }
+        }
 
         BookBundle bundle = new BookBundle();
 
         for(PDDocument doc : printables) {
             PageFormat page = job.getPageFormat(null);
-            applyDefaultSettings(pxlOpts, page);
+            applyDefaultSettings(pxlOpts, page, output.getSupportedMedia());
+
+            //trick pdfbox into an alternate doc size if specified
+            if (docWidth > 0 || docHeight > 0) {
+                Paper paper = page.getPaper();
+
+                if (docWidth <= 0) { docWidth = page.getImageableWidth(); }
+                if (docHeight <= 0) { docHeight = page.getImageableHeight(); }
+
+                paper.setImageableArea(paper.getImageableX(), paper.getImageableY(), docWidth, docHeight);
+                page.setPaper(paper);
+
+                scale = Scaling.SCALE_TO_FIT; //to get custom size we need to force scaling
+
+                //pdf uses imageable area from Paper, so this can be safely removed
+                attributes.remove(MediaPrintableArea.class);
+            }
 
             for(PDPage pd : doc.getPages()) {
                 if (pxlOpts.getRotation() % 360 != 0) {
@@ -131,7 +175,7 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                     PDRectangle bounds = pd.getBBox();
                     if ((page.getImageableHeight() > page.getImageableWidth() && bounds.getWidth() > bounds.getHeight()) || (pd.getRotation() / 90) % 2 == 1) {
                         log.info("Adjusting orientation to print landscape PDF source");
-                        page.setOrientation(PrintOptions.Orientation.LANDSCAPE.getAsFormat());
+                        page.setOrientation(PrintOptions.Orientation.LANDSCAPE.getAsOrientFormat());
                     }
                 } else if (pxlOpts.getOrientation() != PrintOptions.Orientation.PORTRAIT) {
                     //flip imageable area dimensions when in landscape
@@ -146,7 +190,7 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                 }
             }
 
-            bundle.append(new PDFWrapper(doc, scale, false, (float)(pxlOpts.getDensity() * pxlOpts.getUnits().as1Inch()), false, pxlOpts.getOrientation(), hints), page, doc.getNumberOfPages());
+            bundle.append(new PDFWrapper(doc, scale, false, (float)(useDensity * pxlOpts.getUnits().as1Inch()), false, pxlOpts.getOrientation(), hints), page, doc.getNumberOfPages());
         }
 
         job.setJobName(pxlOpts.getJobName(Constants.PDF_PRINT));
@@ -196,5 +240,8 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
 
         originals.clear();
         printables.clear();
+
+        docWidth = 0;
+        docHeight = 0;
     }
 }

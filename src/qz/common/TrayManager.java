@@ -43,6 +43,8 @@ public class TrayManager {
 
     private static final Logger log = LoggerFactory.getLogger(TrayManager.class);
 
+    private boolean headless;
+
     // The cached icons
     private final IconCache iconCache;
 
@@ -65,26 +67,35 @@ public class TrayManager {
     private final DeployUtilities shortcutCreator;
 
     private final PropertyHelper prefs;
-    private String notificationsKey = "tray.notifications";
 
     // Action to run when reload is triggered
     private Thread reloadThread;
 
+    public TrayManager() {
+        this(false);
+    }
+
     /**
      * Create a AutoHideJSystemTray with the specified name/text
      */
-    public TrayManager() {
+    public TrayManager(boolean isHeadless) {
         name = Constants.ABOUT_TITLE + " " + Constants.VERSION;
 
         prefs = new PropertyHelper(SystemUtilities.getDataDirectory() + File.separator + Constants.PREFS_FILE + ".properties");
+
+        headless = isHeadless || prefs.getBoolean(Constants.PREFS_HEADLESS, false) || GraphicsEnvironment.isHeadless();
+        if (headless) {
+            log.info("Running in headless mode");
+        }
 
         // Setup the shortcut name so that the UI components can use it
         shortcutCreator = DeployUtilities.getSystemShortcutCreator();
         shortcutCreator.setShortcutName(Constants.ABOUT_TITLE);
 
         SystemUtilities.setSystemLookAndFeel();
+        iconCache = new IconCache();
 
-        if (SystemTray.isSupported()) {
+        if (!headless && SystemTray.isSupported()) {
             if (SystemUtilities.isWindows()) {
                 tray = TrayType.JX.init();
             } else if (SystemUtilities.isMac()) {
@@ -94,23 +105,21 @@ public class TrayManager {
             }
 
             // Iterates over all images denoted by IconCache.getTypes() and caches them
-            iconCache = new IconCache();
             tray.setImage(iconCache.getImage(IconCache.Icon.DANGER_ICON, tray.getSize()));
             tray.setToolTip(name);
 
             try {
                 SystemTray.getSystemTray().add(tray.tray());
-            } catch (AWTException awt) {
-                log.error("Could not attach tray", awt);
+            }
+            catch(AWTException awt) {
+                log.error("Could not attach tray, forcing headless mode", awt);
+                headless = true;
             }
         } else if (!GraphicsEnvironment.isHeadless()) {
-            iconCache = new IconCache();
             tray = TrayType.TASKBAR.init(exitListener);
             tray.setImage(iconCache.getImage(IconCache.Icon.DANGER_ICON, tray.getSize()));
             tray.setToolTip(name);
             tray.showTaskbar();
-        } else {
-            iconCache = new IconCache();
         }
 
         // Linux specific tasks
@@ -129,13 +138,17 @@ public class TrayManager {
             MacUtilities.fixTrayIcons(iconCache);
         }
 
-        // The allow/block dialog
-        gatewayDialog = new GatewayDialog(null, "Action Required", iconCache);
+        if (!headless) {
+            // The allow/block dialog
+            gatewayDialog = new GatewayDialog(null, "Action Required", iconCache);
 
-        // The ok/cancel dialog
-        confirmDialog = new ConfirmDialog(null, "Please Confirm", iconCache);
+            // The ok/cancel dialog
+            confirmDialog = new ConfirmDialog(null, "Please Confirm", iconCache);
+        }
 
-        addMenuItems();
+        if (tray != null) {
+            addMenuItems();
+        }
     }
 
     /**
@@ -144,12 +157,7 @@ public class TrayManager {
      * @param args arguments to pass to main
      */
     public static void main(String args[]) {
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                new TrayManager();
-            }
-        });
+        SwingUtilities.invokeLater(TrayManager::new);
     }
 
     /**
@@ -181,7 +189,7 @@ public class TrayManager {
         JCheckBoxMenuItem notificationsItem = new JCheckBoxMenuItem("显示所有通知");
         notificationsItem.setToolTipText("显示所有连接／断开消息，可以帮助调试");
         notificationsItem.setMnemonic(KeyEvent.VK_S);
-        notificationsItem.setState(prefs.getBoolean(notificationsKey, false));
+        notificationsItem.setState(prefs.getBoolean(Constants.PREFS_NOTIFICATIONS, false));
         notificationsItem.addActionListener(notificationsListener);
 
         JMenuItem openItem = new JMenuItem("打开所在位置", iconCache.getIcon(IconCache.Icon.FOLDER_ICON));
@@ -190,7 +198,7 @@ public class TrayManager {
 
         JMenuItem desktopItem = new JMenuItem("创建桌面快捷方式", iconCache.getIcon(IconCache.Icon.DESKTOP_ICON));
         desktopItem.setMnemonic(KeyEvent.VK_D);
-        desktopItem.addActionListener(desktopListener);
+        desktopItem.addActionListener(desktopListener());
 
         advancedMenu.add(sitesItem);
         advancedMenu.add(anonymousItem);
@@ -222,8 +230,13 @@ public class TrayManager {
 
         JCheckBoxMenuItem startupItem = new JCheckBoxMenuItem("开机自动运行");
         startupItem.setMnemonic(KeyEvent.VK_S);
-        startupItem.setState(shortcutCreator.hasStartupShortcut());
-        startupItem.addActionListener(startupListener);
+        startupItem.setState(shortcutCreator.isAutostart());
+        startupItem.addActionListener(startupListener());
+        if (!shortcutCreator.canAutoStart()) {
+            startupItem.setEnabled(false);
+            startupItem.setState(false);
+            startupItem.setToolTipText("Autostart has been disabled by the administrator");
+        }
 
         JMenuItem exitItem = new JMenuItem("退出", iconCache.getIcon(IconCache.Icon.EXIT_ICON));
         exitItem.addActionListener(exitListener);
@@ -245,7 +258,7 @@ public class TrayManager {
         @Override
         public void actionPerformed(ActionEvent e) {
             JCheckBoxMenuItem j = (JCheckBoxMenuItem)e.getSource();
-            prefs.setProperty(notificationsKey, j.getState());
+            prefs.setProperty(Constants.PREFS_NOTIFICATIONS, j.getState());
         }
     };
 
@@ -262,11 +275,11 @@ public class TrayManager {
         }
     };
 
-    private final ActionListener desktopListener = new ActionListener() {
-        public void actionPerformed(ActionEvent e) {
-            shortcutToggle(e, DeployUtilities.ToggleType.DESKTOP);
-        }
-    };
+    private final ActionListener desktopListener() {
+        return e -> {
+            shortcutCreator.createDesktopShortcut();
+        };
+    }
 
     private final ActionListener savedListener = new ActionListener() {
         public void actionPerformed(ActionEvent e) {
@@ -274,21 +287,18 @@ public class TrayManager {
         }
     };
 
-    private final ActionListener anonymousListener = new ActionListener() {
-        @Override
-        public void actionPerformed(ActionEvent e) {
-            boolean checkBoxState = true;
-            if (e.getSource() instanceof JCheckBoxMenuItem) {
-                checkBoxState = ((JCheckBoxMenuItem)e.getSource()).getState();
-            }
+    private final ActionListener anonymousListener = e -> {
+        boolean checkBoxState = true;
+        if (e.getSource() instanceof JCheckBoxMenuItem) {
+            checkBoxState = ((JCheckBoxMenuItem)e.getSource()).getState();
+        }
 
-            log.debug("Block unsigned: {}", checkBoxState);
+        log.debug("Block unsigned: {}", checkBoxState);
 
-            if (checkBoxState) {
-                blackList(Certificate.UNKNOWN);
-            } else {
-                FileUtilities.deleteFromFile(Constants.BLOCK_FILE, Certificate.UNKNOWN.data());
-            }
+        if (checkBoxState) {
+            blackList(Certificate.UNKNOWN);
+        } else {
+            FileUtilities.deleteFromFile(Constants.BLOCK_FILE, Certificate.UNKNOWN.data());
         }
     };
 
@@ -299,11 +309,21 @@ public class TrayManager {
         }
     };
 
-    private final ActionListener startupListener = new ActionListener() {
-        public void actionPerformed(ActionEvent e) {
-            shortcutToggle(e, DeployUtilities.ToggleType.STARTUP);
-        }
-    };
+    private ActionListener startupListener() {
+        return e -> {
+            JCheckBoxMenuItem source = (JCheckBoxMenuItem)e.getSource();
+            if (!source.getState() && !confirmDialog.prompt("Remove " + name + " from startup?")) {
+                source.setState(true);
+                return;
+            }
+            if (shortcutCreator.setAutostart(source.getState())) {
+                displayInfoMessage("Successfully " + (source.getState() ? "enabled" : "disabled") + " autostart");
+            } else {
+                displayErrorMessage("Error " + (source.getState() ? "enabling" : "disabling") + " autostart");
+            }
+            source.setState(shortcutCreator.isAutostart());
+        };
+    }
 
     /**
      * Sets the default reload action (in this case, <code>Thread.start()</code>) to be fired
@@ -332,7 +352,7 @@ public class TrayManager {
 
     private final ActionListener exitListener = new ActionListener() {
         public void actionPerformed(ActionEvent e) {
-            boolean showAllNotifications = prefs.getBoolean(notificationsKey, false);
+            boolean showAllNotifications = prefs.getBoolean(Constants.PREFS_NOTIFICATIONS, false);
             if (!showAllNotifications || confirmDialog.prompt("退出 " + name + "?")) { exit(0); }
         }
     };
@@ -340,52 +360,6 @@ public class TrayManager {
     public void exit(int returnCode) {
         prefs.save();
         System.exit(returnCode);
-    }
-
-    /**
-     * Process toggle/checkbox events as they relate to creating shortcuts
-     *
-     * @param e          The ActionEvent passed in from an ActionListener
-     * @param toggleType Either ShortcutUtilities.TOGGLE_TYPE_STARTUP or
-     *                   ShortcutUtilities.TOGGLE_TYPE_DESKTOP
-     */
-    private void shortcutToggle(ActionEvent e, DeployUtilities.ToggleType toggleType) {
-        // Assume true in case its a regular JMenuItem
-        boolean checkBoxState = true;
-        if (e.getSource() instanceof JCheckBoxMenuItem) {
-            checkBoxState = ((JCheckBoxMenuItem)e.getSource()).getState();
-        }
-
-        if (shortcutCreator.getJarPath() == null) {
-            showErrorDialog("Unable to determine jar path; " + toggleType + " entry cannot succeed.");
-            return;
-        }
-
-        if (!checkBoxState) {
-            // Remove shortcut entry
-            if (confirmDialog.prompt("Remove " + name + " from " + toggleType + "?")) {
-                if (!shortcutCreator.removeShortcut(toggleType)) {
-                    displayErrorMessage("Error removing " + toggleType + " entry");
-                    checkBoxState = true;   // Set our checkbox back to true
-                } else {
-                    displayInfoMessage("Successfully removed " + toggleType + " entry");
-                }
-            } else {
-                checkBoxState = true;   // Set our checkbox back to true
-            }
-        } else {
-            // Add shortcut entry
-            if (!shortcutCreator.createShortcut(toggleType)) {
-                displayErrorMessage("Error creating " + toggleType + " entry");
-                checkBoxState = false;   // Set our checkbox back to false
-            } else {
-                displayInfoMessage("Successfully added " + toggleType + " entry");
-            }
-        }
-
-        if (e.getSource() instanceof JCheckBoxMenuItem) {
-            ((JCheckBoxMenuItem)e.getSource()).setState(checkBoxState);
-        }
     }
 
     /**
@@ -400,44 +374,49 @@ public class TrayManager {
             displayErrorMessage("非法证书");
             return false;
         } else {
-            try {
-                SwingUtilities.invokeAndWait(new Runnable() {
-                    @Override
-                    public void run() {
-                        gatewayDialog.prompt("%s 想要 " + prompt, cert, position);
-                    }
-                });
-            }
-            catch(Exception ignore) {}
+            if (!headless) {
+                try {
+                    SwingUtilities.invokeAndWait(() -> gatewayDialog.prompt("%s 想要 " + prompt, cert, position));
+                }
+                catch(Exception ignore) {}
 
-            if (gatewayDialog.isApproved()) {
-                log.info("允许 {} 动作 {}", cert.getCommonName(), prompt);
-                if (gatewayDialog.isPersistent()) {
-                    whiteList(cert);
-                }
-            } else {
-                log.info("拒绝 {} 动作 {}", cert.getCommonName(), prompt);
-                if (gatewayDialog.isPersistent()) {
-                    if (Certificate.UNKNOWN.equals(cert)) {
-                        anonymousItem.doClick(); // if always block anonymous requests -> flag menu item
-                    } else {
-                        blackList(cert);
+                if (gatewayDialog.isApproved()) {
+                    log.info("允许 {} 动作 {}", cert.getCommonName(), prompt);
+                    if (gatewayDialog.isPersistent()) {
+                        whiteList(cert);
+                    }
+                } else {
+                    log.info("拒绝 {} 动作 {}", cert.getCommonName(), prompt);
+                    if (gatewayDialog.isPersistent()) {
+                        if (Certificate.UNKNOWN.equals(cert)) {
+                            anonymousItem.doClick(); // if always block anonymous requests -> flag menu item
+                        } else {
+                            blackList(cert);
+                        }
                     }
                 }
+
+                return gatewayDialog.isApproved();
+            } else {
+                return cert.isTrusted() && cert.isSaved();
             }
         }
-
-        return gatewayDialog.isApproved();
     }
 
     private void whiteList(Certificate cert) {
-        FileUtilities.printLineToFile(Constants.ALLOW_FILE, cert.data());
-        displayInfoMessage(String.format(Constants.WHITE_LIST, cert.getOrganization()));
+        if (FileUtilities.printLineToFile(Constants.ALLOW_FILE, cert.data())) {
+            displayInfoMessage(String.format(Constants.WHITE_LIST, cert.getOrganization()));
+        } else {
+            displayErrorMessage("Failed to write to file (Insufficient user privileges)");
+        }
     }
 
     private void blackList(Certificate cert) {
-        FileUtilities.printLineToFile(Constants.BLOCK_FILE, cert.data());
-        displayInfoMessage(String.format(Constants.BLACK_LIST, cert.getOrganization()));
+        if (FileUtilities.printLineToFile(Constants.BLOCK_FILE, cert.data())) {
+            displayInfoMessage(String.format(Constants.BLACK_LIST, cert.getOrganization()));
+        } else {
+            displayErrorMessage("Failed to write to file (Insufficient user privileges)");
+        }
     }
 
     /**
@@ -453,23 +432,23 @@ public class TrayManager {
             singleInstanceCheck(PrintSocketServer.INSECURE_PORTS, insecurePortIndex.get());
 
             displayInfoMessage("Server started on port(s) " + TrayManager.getPorts(server));
-            aboutDialog.setServer(server);
-            setDefaultIcon();
 
-            setReloadThread(new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        setDangerIcon();
-                        running.set(false);
-                        securePortIndex.set(0);
-                        insecurePortIndex.set(0);
+            if (!headless) {
+                aboutDialog.setServer(server);
+                setDefaultIcon();
+            }
 
-                        server.stop();
-                    }
-                    catch(Exception e) {
-                        displayErrorMessage("Error stopping print socket: " + e.getLocalizedMessage());
-                    }
+            setReloadThread(new Thread(() -> {
+                try {
+                    setDangerIcon();
+                    running.set(false);
+                    securePortIndex.set(0);
+                    insecurePortIndex.set(0);
+
+                    server.stop();
+                }
+                catch(Exception e) {
+                    displayErrorMessage("Error stopping print socket: " + e.getLocalizedMessage());
                 }
             }));
         } else {
@@ -531,12 +510,7 @@ public class TrayManager {
     /** Thread safe method for setting the specified icon */
     private void setIcon(final IconCache.Icon i) {
         if (tray != null) {
-            SwingUtilities.invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                    tray.setImage(iconCache.getImage(i, tray.getSize()));
-                }
-            });
+            SwingUtilities.invokeLater(() -> tray.setImage(iconCache.getImage(i, tray.getSize())));
         }
     }
 
@@ -548,16 +522,17 @@ public class TrayManager {
      * @param level   The message type: Level.INFO, .WARN, .SEVERE
      */
     private void displayMessage(final String caption, final String text, final TrayIcon.MessageType level) {
-        if (tray != null) {
-            SwingUtilities.invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                    boolean showAllNotifications = prefs.getBoolean(notificationsKey, false);
+        if (!headless) {
+            if (tray != null) {
+                SwingUtilities.invokeLater(() -> {
+                    boolean showAllNotifications = prefs.getBoolean(Constants.PREFS_NOTIFICATIONS, false);
                     if (showAllNotifications || level == TrayIcon.MessageType.ERROR) {
                         tray.displayMessage(caption, text, level);
                     }
-                }
-            });
+                });
+            }
+        } else {
+            log.info("{}: [{}] {}", caption, level, text);
         }
     }
 

@@ -348,3 +348,24 @@ code {
     color: #31708F;
     background-color: #D9EDF7;
 }
+
+input[type='radio'] {
+    margin-left: .5em;
+}
+
+#printersLog {
+    max-height: 20em;
+    overflow: auto;
+}
+
+#printersLog .INFO {
+    color: #303030;
+}
+
+#printersLog .WARN {
+    color: #9F7435;
+}
+
+#printersLog .FATAL {
+    color: #9F3535;
+}

@@ -10,7 +10,7 @@
  */
 package qz.printer.action;
 
-import net.sourceforge.iharder.Base64;
+import org.apache.commons.ssl.Base64;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import qz.common.Constants;
 import qz.printer.PrintOptions;
 import qz.printer.PrintOutput;
+import qz.utils.ConnectionUtilities;
 import qz.utils.PrintingUtilities;
 import qz.utils.SystemUtilities;
 
@@ -36,7 +37,6 @@ import java.awt.print.PrinterJob;
 import java.io.ByteArrayInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -63,25 +63,23 @@ public class PrintImage extends PrintPixel implements PrintProcessor, Printable 
     }
 
     @Override
-    public PrintingUtilities.Type getType() {
-        return PrintingUtilities.Type.IMAGE;
+    public PrintingUtilities.Format getFormat() {
+        return PrintingUtilities.Format.IMAGE;
     }
 
     @Override
     public void parseData(JSONArray printData, PrintOptions options) throws JSONException, UnsupportedOperationException {
-        dpiScale = (options.getPixelOptions().getDensity() * options.getPixelOptions().getUnits().as1Inch()) / 72.0;
-
         for(int i = 0; i < printData.length(); i++) {
             JSONObject data = printData.getJSONObject(i);
 
-            PrintingUtilities.Format format = PrintingUtilities.Format.valueOf(data.optString("format", "FILE").toUpperCase(Locale.ENGLISH));
+            PrintingUtilities.Flavor flavor = PrintingUtilities.Flavor.valueOf(data.optString("flavor", "FILE").toUpperCase(Locale.ENGLISH));
 
             try {
                 BufferedImage bi;
-                if (format == PrintingUtilities.Format.BASE64) {
-                    bi = ImageIO.read(new ByteArrayInputStream(Base64.decode(data.getString("data"))));
+                if (flavor == PrintingUtilities.Flavor.BASE64) {
+                    bi = ImageIO.read(new ByteArrayInputStream(Base64.decodeBase64(data.getString("data"))));
                 } else {
-                    bi = ImageIO.read(new URL(data.getString("data")));
+                    bi = ImageIO.read(ConnectionUtilities.getInputStream(data.getString("data")));
                 }
 
                 images.add(bi);
@@ -90,15 +88,37 @@ public class PrintImage extends PrintPixel implements PrintProcessor, Printable 
                 if (e.getCause() != null && e.getCause() instanceof FileNotFoundException) {
                     throw new UnsupportedOperationException("Image file specified could not be found.", e);
                 } else {
-                    throw new UnsupportedOperationException(String.format("Cannot parse (%s)%s as an image", format, data.getString("data")), e);
+                    throw new UnsupportedOperationException(String.format("Cannot parse (%s)%s as an image", flavor, data.getString("data")), e);
                 }
             }
             catch(IOException e) {
-                throw new UnsupportedOperationException(String.format("Cannot parse (%s)%s as an image", format, data.getString("data")), e);
+                throw new UnsupportedOperationException(String.format("Cannot parse (%s)%s as an image: %s", flavor, data.getString("data"), e.getLocalizedMessage()), e);
             }
         }
 
         log.debug("Parsed {} images for printing", images.size());
+    }
+
+    private List<BufferedImage> breakupOverPages(BufferedImage img, PageFormat page) {
+        List<BufferedImage> splits = new ArrayList<>();
+
+        Rectangle printBounds = new Rectangle(0, 0, (int)page.getImageableWidth(), (int)page.getImageableHeight());
+
+        int columnsNeed = (int)Math.ceil(img.getWidth() / page.getImageableWidth());
+        int rowsNeed = (int)Math.ceil(img.getHeight() / page.getImageableHeight());
+        log.trace("Image to be printed across {} pages", columnsNeed * rowsNeed);
+
+        for(int row = 0; row < rowsNeed; row++) {
+            for(int col = 0; col < columnsNeed; col++) {
+                Rectangle clip = new Rectangle((col * printBounds.width), (row * printBounds.height), printBounds.width, printBounds.height);
+                if (clip.x + clip.width > img.getWidth()) { clip.width = img.getWidth() - clip.x; }
+                if (clip.y + clip.height > img.getHeight()) { clip.height = img.getHeight() - clip.y; }
+
+                splits.add(img.getSubimage(clip.x, clip.y, clip.width, clip.height));
+            }
+        }
+
+        return splits;
     }
 
     @Override
@@ -113,7 +133,7 @@ public class PrintImage extends PrintPixel implements PrintProcessor, Printable 
         PageFormat page = job.getPageFormat(null);
 
         PrintOptions.Pixel pxlOpts = options.getPixelOptions();
-        PrintRequestAttributeSet attributes = applyDefaultSettings(pxlOpts, page);
+        PrintRequestAttributeSet attributes = applyDefaultSettings(pxlOpts, page, output.getSupportedMedia());
 
         scaleImage = pxlOpts.isScaleContent();
         dithering = pxlOpts.getDithering();
@@ -122,9 +142,18 @@ public class PrintImage extends PrintPixel implements PrintProcessor, Printable 
 
         //reverse fix for OSX
         if (SystemUtilities.isMac() && pxlOpts.getOrientation() != null
-                && pxlOpts.getOrientation().getAsAttribute() == OrientationRequested.REVERSE_LANDSCAPE) {
+                && pxlOpts.getOrientation().getAsOrientRequested() == OrientationRequested.REVERSE_LANDSCAPE) {
             imageRotation += 180;
             manualReverse = true;
+        }
+
+        if (!scaleImage) {
+            //breakup large images to print across pages as needed
+            List<BufferedImage> split = new ArrayList<>();
+            for(BufferedImage bi : images) {
+                split.addAll(breakupOverPages(bi, page));
+            }
+            images = split;
         }
 
         job.setJobName(pxlOpts.getJobName(Constants.IMAGE_PRINT));

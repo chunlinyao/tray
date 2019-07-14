@@ -315,12 +315,9 @@ public class ImageWrapper {
 
         switch(languageType) {
             case ESCP:
-            case ESCP2:
-            case ESCPOS:
                 appendEpsonSlices(getByteBuffer());
                 break;
             case ZPL:
-            case ZPLII:
                 String zplHexAsString = ByteUtilities.getHexString(getImageAsIntArray());
                 int byteLen = zplHexAsString.length() / 2;
                 int perRow = byteLen / getHeight();
@@ -331,7 +328,6 @@ public class ImageWrapper {
                 getByteBuffer().append(zpl, charset);
                 break;
             case EPL:
-            case EPL2:
                 StringBuilder epl = new StringBuilder("GW")
                         .append(getxPos()).append(",")
                         .append(getyPos()).append(",")
@@ -392,7 +388,7 @@ public class ImageWrapper {
                 getByteBuffer().append(sbpl, charset).append(getBytes());
                 break;
             default:
-                throw new InvalidRawImageException(charset.name() + " image conversion is not yet supported.");
+                throw new InvalidRawImageException(languageType + " image conversion is not yet supported.");
         }
 
         return getByteBuffer().getByteArray();

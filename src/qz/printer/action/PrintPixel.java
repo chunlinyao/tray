@@ -31,23 +31,34 @@ public abstract class PrintPixel {
 
     private static final List<Integer> MAC_BAD_IMAGE_TYPES = Arrays.asList(BufferedImage.TYPE_BYTE_BINARY, BufferedImage.TYPE_CUSTOM);
 
+    private static final List<String> PRINTER_TRAY_ALIASES = Arrays.asList("", "Tray ", "Paper Cassette ");
 
-    protected PrintRequestAttributeSet applyDefaultSettings(PrintOptions.Pixel pxlOpts, PageFormat page) {
+
+    protected PrintRequestAttributeSet applyDefaultSettings(PrintOptions.Pixel pxlOpts, PageFormat page, Media[] supported) {
         PrintRequestAttributeSet attributes = new HashPrintRequestAttributeSet();
 
         //apply general attributes
         if (pxlOpts.getColorType() != null) {
-            attributes.add(pxlOpts.getColorType().getChromatic());
+            attributes.add(pxlOpts.getColorType().getAsChromaticity());
         }
         if (pxlOpts.isDuplex()) {
             attributes.add(Sides.DUPLEX);
         }
         if (pxlOpts.getOrientation() != null) {
-            attributes.add(pxlOpts.getOrientation().getAsAttribute());
+            attributes.add(pxlOpts.getOrientation().getAsOrientRequested());
+        }
+        if (pxlOpts.getPrinterTray() != null && !pxlOpts.getPrinterTray().isEmpty()) {
+            for(Media m : supported) {
+                for(String pta : PRINTER_TRAY_ALIASES) {
+                    if (m.toString().trim().equalsIgnoreCase(pta + pxlOpts.getPrinterTray().trim())) {
+                        attributes.add(m);
+                        break;
+                    }
+                }
+            }
         }
 
         //TODO - set paper thickness
-        //TODO - set printer tray
 
 
         // Java prints using inches at 72dpi

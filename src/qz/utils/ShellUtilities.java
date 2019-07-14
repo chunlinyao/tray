@@ -13,7 +13,6 @@ package qz.utils;
 import org.apache.commons.io.Charsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qz.deploy.DeployUtilities;
 
 import javax.print.attribute.standard.PrinterResolution;
 import java.awt.*;
@@ -21,7 +20,10 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * Utility class for managing all {@code Runtime.exec(...)} functions.
@@ -39,7 +41,7 @@ public class ShellUtilities {
     static {
         if (!SystemUtilities.isWindows()) {
             // Cache existing; permit named overrides w/o full clobber
-            Map<String, String> env = new HashMap<String, String>(System.getenv());
+            Map<String, String> env = new HashMap<>(System.getenv());
             if (SystemUtilities.isMac()) {
                 // Enable LANG overrides
                 env.put("SOFTWARE", "");
@@ -173,33 +175,31 @@ public class ShellUtilities {
      * @return <code>HashMap</code> of name value pairs of printer name and printer description
      */
     public static HashMap<String, String> getCupsPrinters() {
-        HashMap<String, String> descMap = new HashMap<String, String>();
+        HashMap<String, String> descMap = new HashMap<>();
         String devices = ShellUtilities.executeRaw(new String[] {"lpstat", "-a"});
 
-        // Descriptions default to printer names
         for (String line : devices.split("\\r?\\n")) {
             String device = line.split(" ")[0];
-            descMap.put(device, device);
-        }
 
-        // Mac uses description as printer name, fetch it using lpstat
-        if (SystemUtilities.isMac()) {
-            String lookFor = "Description:";
-
-            for (Map.Entry<String, String> entry : descMap.entrySet()) {
-                String props = ShellUtilities.execute(new String[] {"lpstat", "-l", "-p", entry.getKey()}, new String[] {lookFor});
+            // Mac uses description as printer name, fetch it using lpstat
+            if (SystemUtilities.isMac()) {
+                String lookFor = "Description:";
+                String props = ShellUtilities.execute(new String[] {"lpstat", "-l", "-p", device}, new String[] {lookFor});
                 if (!props.isEmpty()) {
                     for(String prop : props.split("\\r?\\n")) {
                         if (prop.startsWith(lookFor)) {
                             String[] desc = prop.split(lookFor);
                             if (desc.length > 0) {
                                 // cache the description so we can map it to the actual printer name
-                                descMap.put(entry.getKey(), desc[desc.length - 1].trim());
-                                log.info(entry.getKey() + ": " + desc[desc.length - 1].trim());
+                                descMap.put(desc[desc.length - 1].trim(), device);
+                                log.info(desc[desc.length - 1].trim() + ": " + device);
                             }
                         }
                     }
                 }
+            } else {
+                // Descriptions default to printer names if not mac
+                descMap.put(device, device);
             }
         }
 
@@ -211,7 +211,7 @@ public class ShellUtilities {
      * @return <code>HashMap</code> of name value pairs of printer name and default density
      */
     public static HashMap<String, PrinterResolution> getCupsDensities(HashMap<String, String> descMap) {
-        HashMap<String, PrinterResolution> densityMap = new HashMap<String, PrinterResolution>();
+        HashMap<String, PrinterResolution> densityMap = new HashMap<>();
         for (Map.Entry<String, String> entry : descMap.entrySet()) {
             String out = ShellUtilities.execute(
                 new String[]{"lpoptions", "-p", entry.getKey(), "-l"},
@@ -233,15 +233,23 @@ public class ShellUtilities {
                             densityMap.put(entry.getKey(), new PrinterResolution(density, density, type));
                             log.debug("Parsed default density from CUPS {}: {}{}", entry.getKey(), density,
                                       type == PrinterResolution.DPI? "dpi":"dpcm");
-                        } catch(NumberFormatException e) {
-                            densityMap.put(entry.getKey(), null);
-                            log.warn("Error parsing default density from CUPS {}: {}", entry.getKey(), part);
-                        }
+                        } catch(NumberFormatException ignore) {}
                     }
                 }
             }
+            if (!densityMap.containsKey(entry.getKey())) {
+                densityMap.put(entry.getKey(), null);
+                log.warn("Error parsing default density from CUPS, either no response or invalid response {}: {}", entry.getKey(), out);
+            }
         }
         return densityMap;
+    }
+
+    /**
+     * Gets the computer's "hostname" from command line
+     */
+    public static String getHostName() {
+        return execute(new String[] {"hostname"}, new String[]{""});
     }
 
     /**
@@ -337,9 +345,9 @@ public class ShellUtilities {
         if (SystemUtilities.isMac()) {
             // Mac tries to open the .app rather than browsing it.  Instead, pass a child with -R to select it in finder
             File[] files = directory.listFiles();
-            if (files.length > 0) {
+            if (files != null && files.length > 0) {
                 // Get first child
-                File child = directory.listFiles()[0];
+                File child = files[0];
                 if (ShellUtilities.execute(new String[] {"open", "-R", child.getCanonicalPath()})) {
                     return;
                 }

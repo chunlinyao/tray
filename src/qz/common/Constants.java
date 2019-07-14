@@ -12,7 +12,7 @@ public class Constants {
     public static final String HEXES = "0123456789ABCDEF";
     public static final char[] HEXES_ARRAY = HEXES.toCharArray();
     public static final int BYTE_BUFFER_SIZE = 8192;
-    public static final Version VERSION = Version.valueOf("2.0.10");
+    public static final Version VERSION = Version.valueOf("2.1.0-RC7");
     public static final Version JAVA_VERSION = SystemUtilities.getJavaVersion();
     public static final String JAVA_VENDOR = System.getProperty("java.vendor");
 
@@ -23,7 +23,9 @@ public class Constants {
     public static final String LOG_FILE = "debug";
     public static final String PROPS_FILE = "qz-tray"; // .properties extension is assumed
     public static final String PREFS_FILE = "prefs"; // .properties extension is assumed
+    public static final String AUTOSTART_FILE = ".autostart";
     public static final String DATA_DIR = "qz";
+    public static final String SHARED_DATA_DIR = "shared";
     public static final int LOG_SIZE = 524288;
     public static final int LOG_ROTATIONS = 5;
 
@@ -38,6 +40,9 @@ public class Constants {
 
     public static final String PROBE_REQUEST = "getProgramName";
     public static final String PROBE_RESPONSE = ABOUT_TITLE;
+
+    public static final String PREFS_NOTIFICATIONS = "tray.notifications";
+    public static final String PREFS_HEADLESS = "tray.headless";
 
     public static final String WHITE_LIST = "Permanently allowed \"%s\" to access local resources";
     public static final String BLACK_LIST = "Permanently blocked \"%s\" from accessing local resources";
@@ -62,4 +67,11 @@ public class Constants {
     public static final String PDF_PRINT = ABOUT_TITLE + " PDF Print";
     public static final String HTML_PRINT = ABOUT_TITLE + " HTML Print";
 
+    public static final Integer[] WSS_PORTS = {8181, 8282, 8383, 8484};
+    public static final Integer[] WS_PORTS = {8182, 8283, 8384, 8485};
+    public static final Integer[] CUPS_RSS_PORTS = {8586, 8687, 8788, 8889};
+
+    public static final String SANDBOX_DIR = "/sandbox";
+    public static final String NOT_SANDBOX_DIR = "/shared";
+    public static final int FILE_LISTENER_DEFAULT_LINES = 10;
 }
