@@ -25,9 +25,9 @@ import qz.utils.PrintingUtilities;
 import qz.utils.SystemUtilities;
 
 import javax.print.attribute.PrintRequestAttributeSet;
-import java.awt.*;
 import javax.print.attribute.standard.Media;
 import javax.print.attribute.standard.MediaPrintableArea;
+import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.print.PageFormat;
 import java.awt.print.Paper;
@@ -62,6 +62,9 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
 
     @Override
     public void parseData(JSONArray printData, PrintOptions options) throws JSONException, UnsupportedOperationException {
+        PrintOptions.Pixel pxlOpts = options.getPixelOptions();
+        double convert = 72.0 / pxlOpts.getUnits().as1Inch();
+
         for(int i = 0; i < printData.length(); i++) {
             JSONObject data = printData.getJSONObject(i);
 
@@ -69,10 +72,10 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                 JSONObject dataOpt = data.getJSONObject("options");
 
                 if (!dataOpt.isNull("pageWidth") && dataOpt.optDouble("pageWidth") > 0) {
-                    docWidth = dataOpt.optDouble("pageWidth") * (72.0 / options.getPixelOptions().getUnits().as1Inch());
+                    docWidth = dataOpt.optDouble("pageWidth") * convert;
                 }
                 if (!dataOpt.isNull("pageHeight") && dataOpt.optDouble("pageHeight") > 0) {
-                    docHeight = dataOpt.optDouble("pageHeight") * (72.0 / options.getPixelOptions().getUnits().as1Inch());
+                    docHeight = dataOpt.optDouble("pageHeight") * convert;
                 }
             }
 
@@ -84,6 +87,19 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                     doc = PDDocument.load(new ByteArrayInputStream(Base64.decodeBase64(data.getString("data"))));
                 } else {
                     doc = PDDocument.load(ConnectionUtilities.getInputStream(data.getString("data")));
+                }
+
+                if (pxlOpts.getBounds() != null) {
+                    PrintOptions.Bounds bnd = pxlOpts.getBounds();
+
+                    for(PDPage page : doc.getPages()) {
+                        PDRectangle box = new PDRectangle(
+                                (float)(bnd.getX() * convert),
+                                page.getMediaBox().getUpperRightY() - (float)((bnd.getHeight() + bnd.getY()) * convert),
+                                (float)(bnd.getWidth() * convert),
+                                (float)(bnd.getHeight() * convert));
+                        page.setMediaBox(box);
+                    }
                 }
 
                 originals.add(doc);
@@ -136,9 +152,9 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
 
         if (!pxlOpts.isRasterize()) {
             if (pxlOpts.getDensity() > 0) {
-                //rasterization is automatically performed upon supplying a density, warn user if they aren't expecting this
-                log.warn("Supplying a print density for PDF printing rasterizes the document.");
-            } else if (SystemUtilities.isMac()) {
+                // clear density for vector prints (applied via print attributes instead)
+                useDensity = 0;
+            } else if (SystemUtilities.isMac() && Constants.JAVA_VERSION.compareWithBuildsTo(Version.valueOf("1.8.0+121")) < 0) {
                 log.warn("OSX systems cannot print vector PDF's, forcing raster to prevent crash.");
                 useDensity = options.getDefaultOptions().getDensity();
             }
@@ -173,7 +189,7 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
 
                 if (pxlOpts.getOrientation() == null) {
                     PDRectangle bounds = pd.getBBox();
-                    if ((page.getImageableHeight() > page.getImageableWidth() && bounds.getWidth() > bounds.getHeight()) || (pd.getRotation() / 90) % 2 == 1) {
+                    if ((page.getImageableHeight() > page.getImageableWidth() && bounds.getWidth() > bounds.getHeight()) ^ (pd.getRotation() / 90) % 2 == 1) {
                         log.info("Adjusting orientation to print landscape PDF source");
                         page.setOrientation(PrintOptions.Orientation.LANDSCAPE.getAsOrientFormat());
                     }
@@ -193,10 +209,23 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
             bundle.append(new PDFWrapper(doc, scale, false, (float)(useDensity * pxlOpts.getUnits().as1Inch()), false, pxlOpts.getOrientation(), hints), page, doc.getNumberOfPages());
         }
 
-        job.setJobName(pxlOpts.getJobName(Constants.PDF_PRINT));
-        job.setPageable(bundle.wrapAndPresent());
+        if (pxlOpts.getSpoolSize() > 0 && bundle.getNumberOfPages() > pxlOpts.getSpoolSize()) {
+            int jobNum = 1;
+            int offset = 0;
+            while(offset < bundle.getNumberOfPages()) {
+                job.setJobName(pxlOpts.getJobName(Constants.PDF_PRINT) + "-" + jobNum++);
+                job.setPageable(bundle.wrapAndPresent(offset, pxlOpts.getSpoolSize()));
 
-        printCopies(output, pxlOpts, job, attributes);
+                printCopies(output, pxlOpts, job, attributes);
+
+                offset += pxlOpts.getSpoolSize();
+            }
+        } else {
+            job.setJobName(pxlOpts.getJobName(Constants.PDF_PRINT));
+            job.setPageable(bundle.wrapAndPresent());
+
+            printCopies(output, pxlOpts, job, attributes);
+        }
     }
 
     private void rotatePage(PDDocument doc, PDPage page, double rotation) {

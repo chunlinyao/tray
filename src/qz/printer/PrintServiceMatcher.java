@@ -15,36 +15,34 @@ import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qz.utils.PrintingUtilities;
+import qz.printer.info.NativePrinter;
+import qz.printer.info.NativePrinterMap;
 import qz.utils.SystemUtilities;
-import sun.awt.AppContext;
 
 import javax.print.PrintService;
 import javax.print.PrintServiceLookup;
 import javax.print.attribute.ResolutionSyntax;
 import javax.print.attribute.standard.Media;
+import javax.print.attribute.standard.MediaTray;
 import javax.print.attribute.standard.PrinterName;
 import javax.print.attribute.standard.PrinterResolution;
+import java.util.Locale;
 
 public class PrintServiceMatcher {
-
     private static final Logger log = LoggerFactory.getLogger(PrintServiceMatcher.class);
 
-    public static PrintService[] getPrintServices() {
-        //Update printer list in CUPS immediately
-        AppContext.getAppContext().put(PrintServiceLookup.class.getDeclaredClasses()[0], null);
-
-        PrintService[] printers = PrintServiceLookup.lookupPrintServices(null, null);
-        log.debug("Found {} printers", printers.length);
-
+    public static NativePrinterMap getNativePrinterList() {
+        NativePrinterMap printers = NativePrinterMap.getInstance();
+        printers.putAll(PrintServiceLookup.lookupPrintServices(null, null));
+        log.debug("Found {} printers", printers.size());
         return printers;
     }
 
     public static String findPrinterName(String query) throws JSONException {
-        PrintService service = PrintServiceMatcher.matchService(query);
+        NativePrinter printer = PrintServiceMatcher.matchPrinter(query);
 
-        if (service != null) {
-            return service.getName();
+        if (printer != null) {
+            return printer.getPrintService().value().getName();
         } else {
             return null;
         }
@@ -55,53 +53,54 @@ public class PrintServiceMatcher {
      *
      * @param printerSearch Search query to compare against service names.
      */
-    public static PrintService matchService(String printerSearch) {
-        PrintService exact = null;
-        PrintService begins = null;
-        PrintService partial = null;
+    public static NativePrinter matchPrinter(String printerSearch) {
+        NativePrinter exact = null;
+        NativePrinter begins = null;
+        NativePrinter partial = null;
 
         log.debug("Searching for PrintService matching {}", printerSearch);
-        printerSearch = printerSearch.toLowerCase();
+        printerSearch = printerSearch.toLowerCase(Locale.ENGLISH);
 
         // Search services for matches
-        PrintService[] printers = getPrintServices();
-        for(PrintService ps : printers) {
-            String printerName = ps.getName().toLowerCase();
-
+        for(NativePrinter printer : getNativePrinterList().values()) {
+            if (printer.getName() == null) {
+                continue;
+            }
+            String printerName = printer.getName().toLowerCase(Locale.ENGLISH);
             if (printerName.equals(printerSearch)) {
-                exact = ps;
+                exact = printer;
                 break;
             }
             if (printerName.startsWith(printerSearch)) {
-                begins = ps;
+                begins = printer;
                 continue;
             }
             if (printerName.contains(printerSearch)) {
-                partial = ps;
+                partial = printer;
                 continue;
             }
 
             if (SystemUtilities.isMac()) {
-                // 1.9 style printer names
-                PrinterName name = ps.getAttribute(PrinterName.class);
-                if (name == null) { continue; }
-                printerName = name.getValue().toLowerCase();
+                // 1.9 compat: fallback for old style names
+                PrinterName name = printer.getLegacyName();
+                if (name == null || name.getValue() == null) { continue; }
+                printerName = name.getValue().toLowerCase(Locale.ENGLISH);
                 if (printerName.equals(printerSearch)) {
-                    exact = ps;
+                    exact = printer;
                     continue;
                 }
                 if (printerName.startsWith(printerSearch)) {
-                    begins = ps;
+                    begins = printer;
                     continue;
                 }
                 if (printerName.contains(printerSearch)) {
-                    partial = ps;
+                    partial = printer;
                 }
             }
         }
 
         // Return closest match
-        PrintService use = null;
+        NativePrinter use = null;
         if (exact != null) {
             use = exact;
         } else if (begins != null) {
@@ -111,7 +110,7 @@ public class PrintServiceMatcher {
         }
 
         if (use != null) {
-            log.debug("Found match: {}", use.getName());
+            log.debug("Found match: {}", use.getPrintService().value().getName());
         } else {
             log.warn("Printer not found: {}", printerSearch);
         }
@@ -125,18 +124,19 @@ public class PrintServiceMatcher {
 
         PrintService defaultService = PrintServiceLookup.lookupDefaultPrintService();
 
-        PrintService[] printers = getPrintServices();
-        for(PrintService ps : printers) {
+        for(NativePrinter printer : getNativePrinterList().values()) {
+            PrintService ps = printer.getPrintService().value();
             JSONObject jsonService = new JSONObject();
             jsonService.put("name", ps.getName());
-            jsonService.put("driver", PrintingUtilities.getDriver(ps));
+            jsonService.put("driver", printer.getDriver().value());
+            jsonService.put("connection", printer.getConnection());
             jsonService.put("default", ps == defaultService);
 
             for(Media m : (Media[])ps.getSupportedAttributeValues(Media.class, null, null)) {
-                if (m.toString().contains("Tray")) { jsonService.accumulate("trays", m.toString()); }
+                if (m instanceof MediaTray) { jsonService.accumulate("trays", m.toString()); }
             }
 
-            PrinterResolution res = PrintingUtilities.getNativeDensity(ps);
+            PrinterResolution res = printer.getResolution().value();
             int density = -1; if (res != null) { density = res.getFeedResolution(ResolutionSyntax.DPI); }
             jsonService.put("density", density);
 

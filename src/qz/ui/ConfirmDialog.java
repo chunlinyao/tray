@@ -1,5 +1,7 @@
 package qz.ui;
 
+import qz.ui.component.IconCache;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -30,7 +32,7 @@ public class ConfirmDialog extends JDialog {
         super(owner, title, true);
         this.iconCache = iconCache;
         this.approved = false;
-        this.setIconImage(iconCache.getImage(IconCache.Icon.DEFAULT_ICON));
+        this.setIconImages(iconCache.getImages(IconCache.Icon.TASK_BAR_ICON));
         initComponents();
     }
 

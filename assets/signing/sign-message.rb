@@ -25,8 +25,8 @@
 # Typical rails controller
 class PrintingController < ActionController::Base
   def sign
-    digest   = OpenSSL::Digest.new('sha1')
-    pkey     = OpenSSL::PKey::read(File.read(Rails.root.join('lib','certs','private-key.pem'))
+    digest   = OpenSSL::Digest.new('sha512') # Use 'sha1' for QZ Tray 2.0 and older
+    pkey     = OpenSSL::PKey::read(File.read(Rails.root.join('lib', 'certs', 'private-key.pem')))
 
     signed   = pkey.sign(digest, params[:request])
     encoded  = Base64.encode64(signed)

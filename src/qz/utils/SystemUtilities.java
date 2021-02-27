@@ -15,12 +15,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.Constants;
 import qz.common.TrayManager;
-import qz.deploy.DeployUtilities;
-import qz.ui.LinkLabel;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.io.IOException;
+import java.net.URLDecoder;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import java.util.TimeZone;
+
+import static com.sun.jna.platform.win32.WinReg.*;
 
 /**
  * Utility class for OS detection functions.
@@ -30,13 +39,17 @@ import java.io.File;
 public class SystemUtilities {
 
     // Name of the os, i.e. "Windows XP", "Mac OS X"
-    private static final String OS_NAME = System.getProperty("os.name").toLowerCase();
+    private static final String OS_NAME = System.getProperty("os.name").toLowerCase(Locale.ENGLISH);
     private static final Logger log = LoggerFactory.getLogger(TrayManager.class);
+    private static final Locale defaultLocale = Locale.getDefault();
 
-    private static Boolean darkMode;
+    private static Boolean darkDesktop;
+    private static Boolean darkTaskbar;
     private static String uname;
     private static String linuxRelease;
     private static String classProtocol;
+    private static Version osVersion;
+    private static String jarPath;
 
 
     /**
@@ -47,89 +60,140 @@ public class SystemUtilities {
         return OS_NAME;
     }
 
+    /**
+     * Call to workaround Locale-specific bugs (See issue #680)
+     * Please call <code>restoreLocale()</code> as soon as possible
+     */
+    public static synchronized void swapLocale() {
+        Locale.setDefault(Locale.ENGLISH);
+    }
+
+    public static synchronized void restoreLocale() {
+        Locale.setDefault(defaultLocale);
+    }
+
+    public static String toISO(Date d) {
+        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'", Locale.ENGLISH);
+        TimeZone tz = TimeZone.getTimeZone("UTC");
+        df.setTimeZone(tz);
+        return df.format(d);
+    }
+
+    public static String timeStamp() {
+        return toISO(new Date());
+    }
+
+    public static Version getOSVersion() {
+        if (osVersion == null) {
+            String version = System.getProperty("os.version");
+            // Windows is missing patch release, read it from registry
+            if (isWindows()) {
+                String patch = WindowsUtilities.getRegString(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ReleaseId");
+                if (patch != null) {
+                    version += "." + patch.trim();
+                }
+            }
+            while (version.split("\\.").length < 3) {
+                version += ".0";
+            }
+            osVersion = Version.valueOf(version);
+        }
+        return osVersion;
+    }
+
+    public static boolean isAdmin() {
+        if (SystemUtilities.isWindows()) {
+            return ShellUtilities.execute("net", "session");
+        } else {
+            return ShellUtilities.executeRaw("whoami").trim().equals("root");
+        }
+    }
 
     /**
-     * Provides a JDK9-friendly wrapper around the inconsistent and poorly standardized Java internal versioning.
-     * This may eventually be superseded by <code>java.lang.Runtime.Version</code>, but the codebase will first need to be switched to JDK9 level.
-     * @return Semantically formatted Java Runtime version
+     * Handle Java versioning nuances
+     * To eventually be replaced with <code>java.lang.Runtime.Version</code> (JDK9+)
      */
     public static Version getJavaVersion() {
         String version = System.getProperty("java.version");
         String[] parts = version.split("\\D+");
-        switch (parts.length) {
-            case 0:
-                return Version.forIntegers(1, 0, 0);
-            case 1:
-                // Assume JDK9 format
-                return Version.forIntegers(1, Integer.parseInt(parts[0]), 0);
-            case 2:
-                // Unknown format
-                return Version.forIntegers(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), 0);
-            case 3:
-                // Assume JDK8 and lower; missing build metadata
-                return Version.forIntegers(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
-            case 4:
-            default:
-                // Assume JDK8 and lower format
-                return Version.forIntegers(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2])).setBuildMetadata(parts[3]);
+
+        int major = 1;
+        int minor = 0;
+        int patch = 0;
+        String meta = "";
+
+        try {
+            switch(parts.length) {
+                default:
+                case 4:
+                    meta = parts[3];
+                case 3:
+                    patch = Integer.parseInt(parts[2]);
+                case 2:
+                    minor = Integer.parseInt(parts[1]);
+                    major = Integer.parseInt(parts[0]);
+                    break;
+                case 1:
+                    major = Integer.parseInt(parts[0]);
+                    if (major <= 8) {
+                        // Force old 1.x style formatting
+                        minor = major;
+                        major = 1;
+                    }
+            }
+        } catch(NumberFormatException e) {
+            log.warn("Could not parse Java version \"{}\"", e);
         }
-    }
-
-
-    /**
-     * Retrieve OS-specific Application Data directory such as:
-     * {@code C:\Users\John\AppData\Roaming\qz} on Windows
-     * -- or --
-     * {@code /Users/John/Library/Application Support/qz} on Mac
-     * -- or --
-     * {@code /home/John/.qz} on Linux
-     *
-     * @return Full path to the Application Data directory
-     */
-    public static String getDataDirectory() {
-        String parent;
-        String folder = Constants.DATA_DIR;
-
-        if (isWindows()) {
-            parent = System.getenv("APPDATA");
-        } else if (isMac()) {
-            parent = System.getProperty("user.home") + File.separator + "Library" + File.separator + "Application Support";
-        } else if (isUnix()) {
-            parent = System.getProperty("user.home");
-            folder = "." + folder;
+        if(meta.trim().isEmpty()) {
+            return Version.forIntegers(major, minor, patch);
         } else {
-            parent = System.getProperty("user.dir");
+            return Version.forIntegers(major, minor, patch).setBuildMetadata(meta);
         }
-
-        return parent + File.separator + folder;
     }
 
     /**
-     * Returns the OS shared data directory for FileIO operations. Must match
-     * that defined in desktop installer scripts, which create directories
-     * and grant read/write access to normal users.
-     * access.
+     * Determines the currently running Jar's absolute path on the local filesystem
+     *
+     * @return A String value representing the absolute path to the currently running
+     * jar
+     */
+    public static String detectJarPath() {
+        try {
+            String jarPath = new File(SystemUtilities.class.getProtectionDomain().getCodeSource().getLocation().getPath()).getCanonicalPath();
+            // Fix characters that get URL encoded when calling getPath()
+            return URLDecoder.decode(jarPath, "UTF-8");
+        } catch(IOException ex) {
+            log.error("Unable to determine Jar path", ex);
+        }
+        return null;
+    }
+
+    /**
+     * Returns the jar which we will create a shortcut for
+     *
+     * @return The path to the jar path which has been set
+     */
+    public static String getJarPath() {
+        if (jarPath == null) {
+            jarPath = detectJarPath();
+        }
+        return jarPath;
+    }
+
+    /**
+     * Returns the app's path, based on the jar location
+     * or null if no .jar is found (such as running from IDE)
      * @return
      */
-    public static String getSharedDataDirectory() {
-        String parent;
-
-        if (isWindows()) {
-            parent = System.getenv("PROGRAMDATA");
-        } else if (isMac()) {
-            parent = "/Library/Application Support/";
-        } else {
-            parent = "/srv/";
+    public static Path detectAppPath() {
+        String jarPath = detectJarPath();
+        if (jarPath != null) {
+            File jar = new File(jarPath);
+            if (jar.getPath().endsWith(".jar") && jar.exists()) {
+                return Paths.get(jar.getParent());
+            }
         }
-
-        return parent + File.separator + Constants.DATA_DIR;
-    }
-
-    public static String getSharedDirectory() {
-        String parent = DeployUtilities.getSystemShortcutCreator().getParentDirectory();
-        String folder = Constants.SHARED_DATA_DIR;
-
-        return parent + File.separator + folder;
+        return null;
     }
 
     /**
@@ -149,6 +213,8 @@ public class SystemUtilities {
     public static boolean isWindows() {
         return (OS_NAME.contains("win"));
     }
+
+    public static boolean isWindowsXP() { return OS_NAME.contains("win") && OS_NAME.contains("xp"); }
 
     /**
      * Determine if the current Operating System is Mac OS
@@ -174,7 +240,7 @@ public class SystemUtilities {
      * @return {@code true} if Unix, {@code false} otherwise
      */
     public static boolean isUnix() {
-        return (OS_NAME.contains("nix") || OS_NAME.contains("nux") || OS_NAME.indexOf("aix") > 0 || OS_NAME.contains("sunos"));
+        return (OS_NAME.contains("mac") || OS_NAME.contains("nix") || OS_NAME.contains("nux") || OS_NAME.indexOf("aix") > 0 || OS_NAME.contains("sunos"));
     }
 
     /**
@@ -245,39 +311,68 @@ public class SystemUtilities {
         return uname;
     }
 
-    public static boolean isDarkMode() {
-        return isDarkMode(false);
+    public static boolean isDarkTaskbar() {
+        return isDarkTaskbar(false);
     }
 
-    public static boolean isDarkMode(boolean recheck) {
-        if (darkMode == null || recheck) {
-            // Check for Dark Mode on MacOS
-            if (isMac()) {
-                darkMode = MacUtilities.isDarkMode();
-            } else if (isWindows()) {
-                darkMode = WindowsUtilities.isDarkMode();
+    public static boolean isDarkTaskbar(boolean recheck) {
+        if(darkTaskbar == null || recheck) {
+            if (isWindows()) {
+                darkTaskbar = WindowsUtilities.isDarkTaskbar();
+            } else if(isMac()) {
+                // Ignore, we'll set the template flag using JNA
+                darkTaskbar = false;
             } else {
-                darkMode = UbuntuUtilities.isDarkMode();
+                // Linux doesn't differentiate; return the cached darkDesktop value
+                darkTaskbar = isDarkDesktop();
             }
         }
-        return darkMode.booleanValue();
+        return darkTaskbar.booleanValue();
+    }
+
+    public static boolean isDarkDesktop() {
+        return isDarkDesktop(false);
+    }
+
+    public static boolean isDarkDesktop(boolean recheck) {
+        if (darkDesktop == null || recheck) {
+            // Check for Dark Mode on MacOS
+            if (isMac()) {
+                darkDesktop = MacUtilities.isDarkDesktop();
+            } else if (isWindows()) {
+                darkDesktop = WindowsUtilities.isDarkDesktop();
+            } else {
+                darkDesktop = UbuntuUtilities.isDarkMode();
+            }
+        }
+        return darkDesktop.booleanValue();
     }
 
     public static void adjustThemeColors() {
-        if (isDarkMode()) {
-            Constants.WARNING_COLOR = Constants.WARNING_COLOR_LIGHTER;
-            Constants.TRUSTED_COLOR = Constants.TRUSTED_COLOR_LIGHTER;
+        Constants.WARNING_COLOR = isDarkDesktop() ? Constants.WARNING_COLOR_DARK : Constants.WARNING_COLOR_LITE;
+        Constants.TRUSTED_COLOR = isDarkDesktop() ? Constants.TRUSTED_COLOR_DARK : Constants.TRUSTED_COLOR_LITE;
+    }
+
+    public static boolean prefersMaskTrayIcon() {
+        if (Constants.MASK_TRAY_SUPPORTED) {
+            if (SystemUtilities.isMac()) {
+                // Assume a pid of -1 is a broken JNA
+                return MacUtilities.getProcessID() != -1;
+            } else if (SystemUtilities.isWindows() && SystemUtilities.getOSVersion().getMajorVersion() >= 10) {
+                return true;
+            }
         }
+        return false;
     }
 
     public static boolean setSystemLookAndFeel() {
         try {
             UIManager.getDefaults().put("Button.showMnemonics", Boolean.TRUE);
             boolean darkulaThemeNeeded = true;
-            if(isUnix() && UbuntuUtilities.isDarkMode()) {
+            if(!isMac() && (isUnix() && UbuntuUtilities.isDarkMode())) {
                 darkulaThemeNeeded = false;
             }
-            if(isDarkMode() && darkulaThemeNeeded) {
+            if(isDarkDesktop() && darkulaThemeNeeded) {
                 UIManager.setLookAndFeel("com.bulenkov.darcula.DarculaLaf");
             } else {
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
@@ -355,7 +450,7 @@ public class SystemUtilities {
         if(isMac()) {
             return MacUtilities.getScaleFactor() > 1;
         } else if(isWindows()) {
-            return Toolkit.getDefaultToolkit().getScreenResolution() / 96.0 > 1;
+            return WindowsUtilities.getScaleFactor() > 1;
         }
         // Fallback to a JNA Gdk technique
         return UbuntuUtilities.getScaleFactor() > 1;
@@ -370,5 +465,33 @@ public class SystemUtilities {
             classProtocol = SystemUtilities.class.getResource("").getProtocol();
         }
         return "jar".equals(classProtocol);
+    }
+
+    public static void appendProperty(String property, String value) {
+        appendProperty(property, value, File.pathSeparator);
+    }
+
+    public static void appendProperty(String property, String value, String delimiter) {
+        String currentValue = System.getProperty(property);
+        System.setProperty(property, currentValue == null ? value : currentValue + delimiter + value);
+    }
+
+    public static boolean isJDK() {
+        String path = System.getProperty("sun.boot.library.path");
+        if(path != null) {
+            String javacPath = "";
+            if(path.endsWith(File.separator + "bin")) {
+                javacPath = path;
+            } else {
+                int libIndex = path.lastIndexOf(File.separator + "lib");
+                if(libIndex > 0) {
+                    javacPath = path.substring(0, libIndex) + File.separator + "bin";
+                }
+            }
+            if(!javacPath.isEmpty()) {
+                return new File(javacPath, "javac").exists() || new File(javacPath, "javac.exe").exists();
+            }
+        }
+        return false;
     }
 }

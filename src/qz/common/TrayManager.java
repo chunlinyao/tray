@@ -10,16 +10,18 @@
 
 package qz.common;
 
+import com.github.zafarkhaja.semver.Version;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.auth.Certificate;
-import qz.deploy.DeployUtilities;
-import qz.deploy.LinuxCertificate;
-import qz.deploy.WindowsDeploy;
+import qz.auth.RequestState;
+import qz.installer.certificate.firefox.FirefoxCertificateInstaller;
+import qz.installer.shortcut.ShortcutCreator;
 import qz.ui.*;
+import qz.ui.component.IconCache;
 import qz.ui.tray.TrayType;
 import qz.utils.*;
 import qz.ws.PrintSocketServer;
@@ -31,6 +33,7 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -56,6 +59,8 @@ public class TrayManager {
     private AboutDialog aboutDialog;
     private LogDialog logDialog;
     private SiteManagerDialog sitesDialog;
+    private ArrayList<Component> componentList;
+    private IconCache.Icon shownIcon;
 
     // Need a class reference to this so we can set it from the request dialog window
     private JCheckBoxMenuItem anonymousItem;
@@ -64,7 +69,7 @@ public class TrayManager {
     private final String name;
 
     // The shortcut and startup helper
-    private final DeployUtilities shortcutCreator;
+    private final ShortcutCreator shortcutCreator;
 
     private final PropertyHelper prefs;
 
@@ -81,27 +86,34 @@ public class TrayManager {
     public TrayManager(boolean isHeadless) {
         name = Constants.ABOUT_TITLE + " " + Constants.VERSION;
 
-        prefs = new PropertyHelper(SystemUtilities.getDataDirectory() + File.separator + Constants.PREFS_FILE + ".properties");
+        prefs = new PropertyHelper(FileUtilities.USER_DIR + File.separator + Constants.PREFS_FILE + ".properties");
 
+        //headless if turned on by user or unsupported by environment
         headless = isHeadless || prefs.getBoolean(Constants.PREFS_HEADLESS, false) || GraphicsEnvironment.isHeadless();
         if (headless) {
             log.info("Running in headless mode");
         }
 
         // Setup the shortcut name so that the UI components can use it
-        shortcutCreator = DeployUtilities.getSystemShortcutCreator();
-        shortcutCreator.setShortcutName(Constants.ABOUT_TITLE);
+        shortcutCreator = ShortcutCreator.getInstance();
 
         SystemUtilities.setSystemLookAndFeel();
         iconCache = new IconCache();
 
-        if (!headless && SystemTray.isSupported()) {
+        if (!headless && SystemTray.isSupported()) { // UI mode with tray
             if (SystemUtilities.isWindows()) {
                 tray = TrayType.JX.init();
+                // Undocumented HiDPI behavior
+                tray.setImageAutoSize(true);
             } else if (SystemUtilities.isMac()) {
                 tray = TrayType.CLASSIC.init();
             } else {
                 tray = TrayType.MODERN.init();
+            }
+
+            // OS-specific tray icon handling
+            if (SystemTray.isSupported()) {
+                iconCache.fixTrayIcons(SystemUtilities.isDarkTaskbar());
             }
 
             // Iterates over all images denoted by IconCache.getTypes() and caches them
@@ -115,35 +127,61 @@ public class TrayManager {
                 log.error("Could not attach tray, forcing headless mode", awt);
                 headless = true;
             }
-        } else if (!GraphicsEnvironment.isHeadless()) {
+        } else if (!headless) { // UI mode without tray
             tray = TrayType.TASKBAR.init(exitListener);
             tray.setImage(iconCache.getImage(IconCache.Icon.DANGER_ICON, tray.getSize()));
             tray.setToolTip(name);
             tray.showTaskbar();
         }
 
-        // Linux specific tasks
-        if (SystemUtilities.isLinux()) {
-            // Fix the tray icon to look proper on Ubuntu
-            if (SystemTray.isSupported()) {
-                UbuntuUtilities.fixTrayIcons(iconCache);
-            }
-            // Install cert into user's nssdb for Chrome, etc
-            LinuxCertificate.installCertificate();
-        } else if (SystemUtilities.isWindows()) {
-            // Configure IE intranet zone via registry to allow websockets
-            WindowsDeploy.configureIntranetZone();
-            WindowsDeploy.configureEdgeLoopback();
-        } else if (SystemUtilities.isMac()) {
-            MacUtilities.fixTrayIcons(iconCache);
+        // TODO: Remove when fixed upstream.  See issue #393
+        if (SystemUtilities.isUnix() && !isHeadless) {
+            // Update printer list in CUPS immediately (normally 2min)
+            System.setProperty("sun.java2d.print.polling", "false");
         }
 
         if (!headless) {
+            componentList = new ArrayList<>();
+
             // The allow/block dialog
             gatewayDialog = new GatewayDialog(null, "Action Required", iconCache);
+            componentList.add(gatewayDialog);
 
             // The ok/cancel dialog
             confirmDialog = new ConfirmDialog(null, "Please Confirm", iconCache);
+            componentList.add(confirmDialog);
+
+            // Detect theme changes
+            new Thread(() -> {
+                boolean darkDesktopMode = SystemUtilities.isDarkDesktop();
+                boolean darkTaskbarMode = SystemUtilities.isDarkTaskbar();
+                while(true) {
+                    try {
+                        Thread.sleep(1000);
+                        if (darkDesktopMode != SystemUtilities.isDarkDesktop(true) ||
+                            darkTaskbarMode != SystemUtilities.isDarkTaskbar(true)) {
+                            darkDesktopMode = SystemUtilities.isDarkDesktop();
+                            darkTaskbarMode = SystemUtilities.isDarkTaskbar();
+                            iconCache.fixTrayIcons(darkTaskbarMode);
+                            refreshIcon(null);
+                            SwingUtilities.invokeLater(() -> {
+                                SystemUtilities.setSystemLookAndFeel();
+                                for(Component c : componentList) {
+                                    SwingUtilities.updateComponentTreeUI(c);
+                                    if (c instanceof Themeable) {
+                                        ((Themeable)c).refresh();
+                                    }
+                                    if (c instanceof JDialog) {
+                                        ((JDialog)c).pack();
+                                    } else if (c instanceof JPopupMenu) {
+                                        ((JPopupMenu)c).pack();
+                                    }
+                                }
+                            });
+                        }
+                    } catch(InterruptedException ignore) {}
+                }
+            }).start();
         }
 
         if (tray != null) {
@@ -165,6 +203,7 @@ public class TrayManager {
      */
     private void addMenuItems() {
         JPopupMenu popup = new JPopupMenu();
+        componentList.add(popup);
 
         JMenu advancedMenu = new JMenu("高级");
         advancedMenu.setMnemonic(KeyEvent.VK_A);
@@ -174,40 +213,80 @@ public class TrayManager {
         sitesItem.setMnemonic(KeyEvent.VK_M);
         sitesItem.addActionListener(savedListener);
         sitesDialog = new SiteManagerDialog(sitesItem, iconCache);
+        componentList.add(sitesDialog);
 
-        anonymousItem = new JCheckBoxMenuItem("阻止匿名请求");
-        anonymousItem.setToolTipText("阻止所有不含合法签名的请求");
-        anonymousItem.setMnemonic(KeyEvent.VK_K);
-        anonymousItem.setState(Certificate.UNKNOWN.isBlocked());
-        anonymousItem.addActionListener(anonymousListener);
+        JMenuItem diagnosticMenu = new JMenu("诊断");
 
-        JMenuItem logItem = new JMenuItem("查看日志", iconCache.getIcon(IconCache.Icon.LOG_ICON));
-        logItem.setMnemonic(KeyEvent.VK_L);
-        logItem.addActionListener(logListener);
-        logDialog = new LogDialog(logItem, iconCache);
+        JMenuItem browseApp = new JMenuItem("查看程序目录...", iconCache.getIcon(IconCache.Icon.FOLDER_ICON));
+        browseApp.setToolTipText(FileUtilities.getParentDirectory(SystemUtilities.getJarPath()));
+        browseApp.setMnemonic(KeyEvent.VK_O);
+        browseApp.addActionListener(e -> ShellUtilities.browseAppDirectory());
+        diagnosticMenu.add(browseApp);
+
+        JMenuItem browseUser = new JMenuItem("查看用户目录...", iconCache.getIcon(IconCache.Icon.FOLDER_ICON));
+        browseUser.setToolTipText(FileUtilities.USER_DIR.toString());
+        browseUser.setMnemonic(KeyEvent.VK_U);
+        browseUser.addActionListener(e -> ShellUtilities.browseDirectory(FileUtilities.USER_DIR));
+        diagnosticMenu.add(browseUser);
+
+        JMenuItem browseShared = new JMenuItem("查看共享目录...", iconCache.getIcon(IconCache.Icon.FOLDER_ICON));
+        browseShared.setToolTipText(FileUtilities.SHARED_DIR.toString());
+        browseShared.setMnemonic(KeyEvent.VK_S);
+        browseShared.addActionListener(e -> ShellUtilities.browseDirectory(FileUtilities.SHARED_DIR));
+        diagnosticMenu.add(browseShared);
+
+        diagnosticMenu.add(new JSeparator());
 
         JCheckBoxMenuItem notificationsItem = new JCheckBoxMenuItem("显示所有通知");
         notificationsItem.setToolTipText("显示所有连接／断开消息，可以帮助调试");
         notificationsItem.setMnemonic(KeyEvent.VK_S);
         notificationsItem.setState(prefs.getBoolean(Constants.PREFS_NOTIFICATIONS, false));
         notificationsItem.addActionListener(notificationsListener);
+        diagnosticMenu.add(notificationsItem);
 
-        JMenuItem openItem = new JMenuItem("打开所在位置", iconCache.getIcon(IconCache.Icon.FOLDER_ICON));
-        openItem.setMnemonic(KeyEvent.VK_O);
-        openItem.addActionListener(openListener);
+        JCheckBoxMenuItem monocleItem = new JCheckBoxMenuItem("用Monocle打印HTML");
+        monocleItem.setToolTipText("Use monocle platform for HTML printing (restart required)");
+        monocleItem.setMnemonic(KeyEvent.VK_U);
+        monocleItem.setState(prefs.getBoolean(Constants.PREFS_MONOCLE, true));
+        monocleItem.addActionListener(monocleListener);
+
+        if (Constants.JAVA_VERSION.greaterThanOrEqualTo(Version.valueOf("11.0.0"))) { //only include if it can be used
+            diagnosticMenu.add(monocleItem);
+        }
+
+        diagnosticMenu.add(new JSeparator());
+
+        JMenuItem logItem = new JMenuItem("查看日志 (活动)...", iconCache.getIcon(IconCache.Icon.LOG_ICON));
+        logItem.setMnemonic(KeyEvent.VK_L);
+        logItem.addActionListener(logListener);
+        diagnosticMenu.add(logItem);
+        logDialog = new LogDialog(logItem, iconCache);
+        componentList.add(logDialog);
+
+        JMenuItem zipLogs = new JMenuItem("压缩日志(到桌面)");
+        zipLogs.setToolTipText("压缩诊断日志，保存到桌面。");
+        zipLogs.setMnemonic(KeyEvent.VK_Z);
+        zipLogs.addActionListener(e -> FileUtilities.zipLogs());
+        diagnosticMenu.add(zipLogs);
 
         JMenuItem desktopItem = new JMenuItem("创建桌面快捷方式", iconCache.getIcon(IconCache.Icon.DESKTOP_ICON));
         desktopItem.setMnemonic(KeyEvent.VK_D);
         desktopItem.addActionListener(desktopListener());
 
-        advancedMenu.add(sitesItem);
-        advancedMenu.add(anonymousItem);
-        advancedMenu.add(logItem);
-        advancedMenu.add(notificationsItem);
-        advancedMenu.add(new JSeparator());
-        advancedMenu.add(openItem);
-        advancedMenu.add(desktopItem);
+        anonymousItem = new JCheckBoxMenuItem("组织匿名访问");
+        anonymousItem.setToolTipText("Blocks all requests that do not contain a valid certificate/signature");
+        anonymousItem.setMnemonic(KeyEvent.VK_K);
+        anonymousItem.setState(Certificate.UNKNOWN.isBlocked());
+        anonymousItem.addActionListener(anonymousListener);
 
+        if(Constants.ENABLE_DIAGNOSTICS) {
+            advancedMenu.add(diagnosticMenu);
+            advancedMenu.add(new JSeparator());
+        }
+        advancedMenu.add(sitesItem);
+        advancedMenu.add(desktopItem);
+        advancedMenu.add(new JSeparator());
+        advancedMenu.add(anonymousItem);
 
         JMenuItem reloadItem = new JMenuItem("重启", iconCache.getIcon(IconCache.Icon.RELOAD_ICON));
         reloadItem.setMnemonic(KeyEvent.VK_R);
@@ -216,10 +295,8 @@ public class TrayManager {
         JMenuItem aboutItem = new JMenuItem("关于", iconCache.getIcon(IconCache.Icon.ABOUT_ICON));
         aboutItem.setMnemonic(KeyEvent.VK_B);
         aboutItem.addActionListener(aboutListener);
-        aboutDialog = new AboutDialog(aboutItem, iconCache, name);
-        aboutDialog.addPanelButton(sitesItem);
-        aboutDialog.addPanelButton(logItem);
-        aboutDialog.addPanelButton(openItem);
+        aboutDialog = new AboutDialog(aboutItem, iconCache);
+        componentList.add(aboutDialog);
 
         if (SystemUtilities.isMac()) {
             MacUtilities.registerAboutDialog(aboutDialog);
@@ -230,7 +307,7 @@ public class TrayManager {
 
         JCheckBoxMenuItem startupItem = new JCheckBoxMenuItem("开机自动运行");
         startupItem.setMnemonic(KeyEvent.VK_S);
-        startupItem.setState(shortcutCreator.isAutostart());
+        startupItem.setState(FileUtilities.isAutostart());
         startupItem.addActionListener(startupListener());
         if (!shortcutCreator.canAutoStart()) {
             startupItem.setEnabled(false);
@@ -257,21 +334,17 @@ public class TrayManager {
     private final ActionListener notificationsListener = new ActionListener() {
         @Override
         public void actionPerformed(ActionEvent e) {
-            JCheckBoxMenuItem j = (JCheckBoxMenuItem)e.getSource();
-            prefs.setProperty(Constants.PREFS_NOTIFICATIONS, j.getState());
+            prefs.setProperty(Constants.PREFS_NOTIFICATIONS, ((JCheckBoxMenuItem)e.getSource()).getState());
         }
     };
 
-    private final ActionListener openListener = new ActionListener() {
+    private final ActionListener monocleListener = new ActionListener() {
+        @Override
         public void actionPerformed(ActionEvent e) {
-            try {
-                ShellUtilities.browseDirectory(shortcutCreator.getParentDirectory());
-            }
-            catch(Exception ex) {
-                if (!SystemUtilities.isLinux() || !ShellUtilities.execute(new String[] {"xdg-open", shortcutCreator.getParentDirectory()})) {
-                    showErrorDialog("Sorry, unable to open the file browser: " + ex.getLocalizedMessage());
-                }
-            }
+            JCheckBoxMenuItem j = (JCheckBoxMenuItem)e.getSource();
+            prefs.setProperty(Constants.PREFS_MONOCLE, j.getState());
+            displayWarningMessage(String.format("A restart of %s is required to ensure this feature is %sabled.",
+                                                Constants.ABOUT_TITLE, j.getState()? "en":"dis"));
         }
     };
 
@@ -316,12 +389,12 @@ public class TrayManager {
                 source.setState(true);
                 return;
             }
-            if (shortcutCreator.setAutostart(source.getState())) {
+            if (FileUtilities.setAutostart(source.getState())) {
                 displayInfoMessage("Successfully " + (source.getState() ? "enabled" : "disabled") + " autostart");
             } else {
                 displayErrorMessage("Error " + (source.getState() ? "enabling" : "disabling") + " autostart");
             }
-            source.setState(shortcutCreator.isAutostart());
+            source.setState(FileUtilities.isAutostart());
         };
     }
 
@@ -369,37 +442,32 @@ public class TrayManager {
         JOptionPane.showMessageDialog(null, message, name, JOptionPane.ERROR_MESSAGE);
     }
 
-    public boolean showGatewayDialog(final Certificate cert, final String prompt, final Point position) {
-        if (cert == null) {
-            displayErrorMessage("非法证书");
-            return false;
-        } else {
-            if (!headless) {
-                try {
-                    SwingUtilities.invokeAndWait(() -> gatewayDialog.prompt("%s 想要 " + prompt, cert, position));
-                }
-                catch(Exception ignore) {}
-
-                if (gatewayDialog.isApproved()) {
-                    log.info("允许 {} 动作 {}", cert.getCommonName(), prompt);
-                    if (gatewayDialog.isPersistent()) {
-                        whiteList(cert);
-                    }
-                } else {
-                    log.info("拒绝 {} 动作 {}", cert.getCommonName(), prompt);
-                    if (gatewayDialog.isPersistent()) {
-                        if (Certificate.UNKNOWN.equals(cert)) {
-                            anonymousItem.doClick(); // if always block anonymous requests -> flag menu item
-                        } else {
-                            blackList(cert);
-                        }
-                    }
-                }
-
-                return gatewayDialog.isApproved();
-            } else {
-                return cert.isTrusted() && cert.isSaved();
+    public boolean showGatewayDialog(final RequestState request, final String prompt, final Point position) {
+        if (!headless) {
+            try {
+                SwingUtilities.invokeAndWait(() -> gatewayDialog.prompt("%s wants to " + prompt, request, position));
             }
+            catch(Exception ignore) {}
+
+            if (gatewayDialog.isApproved()) {
+                log.info("允许 {} 动作 {}", request.getCertName(), prompt);
+                if (gatewayDialog.isPersistent()) {
+                    whiteList(request.getCertUsed());
+                }
+            } else {
+                log.info("拒绝 {} 动作 {}", request.getCertName(), prompt);
+                if (gatewayDialog.isPersistent()) {
+                    if (!request.hasCertificate()) {
+                        anonymousItem.doClick(); // if always block anonymous requests -> flag menu item
+                    } else {
+                        blackList(request.getCertUsed());
+                    }
+                }
+            }
+
+            return gatewayDialog.isApproved();
+        } else {
+            return request.hasSavedCert();
         }
     }
 
@@ -484,7 +552,12 @@ public class TrayManager {
      * Thread safe method for setting the default icon
      */
     public void setDefaultIcon() {
-        setIcon(IconCache.Icon.DEFAULT_ICON);
+        // Workaround for JDK-8252015
+        if(SystemUtilities.isMac() && Constants.MASK_TRAY_SUPPORTED && !MacUtilities.jdkSupportsTemplateIcon()) {
+            setIcon(IconCache.Icon.DEFAULT_ICON, () -> MacUtilities.toggleTemplateIcon(tray.tray()));
+        } else {
+            setIcon(IconCache.Icon.DEFAULT_ICON);
+        }
     }
 
     /** Thread safe method for setting the error status message */
@@ -508,10 +581,24 @@ public class TrayManager {
     }
 
     /** Thread safe method for setting the specified icon */
-    private void setIcon(final IconCache.Icon i) {
-        if (tray != null) {
-            SwingUtilities.invokeLater(() -> tray.setImage(iconCache.getImage(i, tray.getSize())));
+    private void setIcon(final IconCache.Icon i, Runnable whenDone) {
+        if (tray != null && i != shownIcon) {
+            shownIcon = i;
+            refreshIcon(whenDone);
         }
+    }
+
+    private void setIcon(final IconCache.Icon i) {
+        setIcon(i, null);
+    }
+
+    public void refreshIcon(final Runnable whenDone) {
+        SwingUtilities.invokeLater(() -> {
+            tray.setImage(iconCache.getImage(shownIcon, tray.getSize()));
+            if(whenDone != null) {
+                whenDone.run();
+            }
+        });
     }
 
     /**
@@ -526,7 +613,7 @@ public class TrayManager {
             if (tray != null) {
                 SwingUtilities.invokeLater(() -> {
                     boolean showAllNotifications = prefs.getBoolean(Constants.PREFS_NOTIFICATIONS, false);
-                    if (showAllNotifications || level == TrayIcon.MessageType.ERROR) {
+                    if (showAllNotifications || level != TrayIcon.MessageType.INFO) {
                         tray.displayMessage(caption, text, level);
                     }
                 });
@@ -542,6 +629,14 @@ public class TrayManager {
                 new SingleInstanceChecker(this, port);
             }
         }
+    }
+
+    public boolean isMonoclePreferred() {
+        return prefs.getBoolean(Constants.PREFS_MONOCLE, true);
+    }
+
+    public boolean isHeadless() {
+        return headless;
     }
 
 }

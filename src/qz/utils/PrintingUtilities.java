@@ -14,18 +14,13 @@ import qz.printer.action.PrintProcessor;
 import qz.printer.action.ProcessorFactory;
 import qz.ws.PrintSocketClient;
 
-import javax.print.PrintService;
-import javax.print.attribute.ResolutionSyntax;
-import javax.print.attribute.standard.PrinterResolution;
 import java.awt.print.PrinterAbortException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Locale;
 
 public class PrintingUtilities {
 
     private static final Logger log = LoggerFactory.getLogger(PrintingUtilities.class);
-
-    private static HashMap<String,String> CUPS_DESC; //name -> description
-    private static HashMap<String,PrinterResolution> CUPS_DPI; //description -> default dpi
 
     private static GenericKeyedObjectPool<Format,PrintProcessor> processorPool;
 
@@ -51,8 +46,16 @@ public class PrintingUtilities {
         //grab first data object to determine type for entire set
         JSONObject data = printData.optJSONObject(0);
 
-        Format format;
+        //Check for RAW type to coerce COMMAND format handling
+        Type type;
         if (data == null) {
+            type = Type.RAW;
+        } else {
+            type = Type.valueOf(data.optString("type", "RAW").toUpperCase(Locale.ENGLISH));
+        }
+
+        Format format;
+        if (type == Type.RAW) {
             format = Format.COMMAND;
         } else {
             format = Format.valueOf(data.optString("format", "COMMAND").toUpperCase(Locale.ENGLISH));
@@ -103,7 +106,7 @@ public class PrintingUtilities {
             if (!data.isNull("flavor")) { return; } //flavor exists only in new version, no need to convert any data
 
             if (!data.isNull("format")) {
-                String format = data.getString("format").toUpperCase();
+                String format = data.getString("format").toUpperCase(Locale.ENGLISH);
                 if (Arrays.asList("BASE64", "FILE", "HEX", "PLAIN", "XML").contains(format)) {
                     data.put("flavor", format);
                     data.remove("format");
@@ -111,7 +114,7 @@ public class PrintingUtilities {
             }
 
             if (!data.isNull("type")) {
-                String type = data.getString("type").toUpperCase();
+                String type = data.getString("type").toUpperCase(Locale.ENGLISH);
                 if (Arrays.asList("HTML", "IMAGE", "PDF").contains(type)) {
                     data.put("type", "PIXEL");
                     data.put("format", type);
@@ -126,97 +129,6 @@ public class PrintingUtilities {
             processorPool.returnObject(processor.getFormat(), processor);
         }
         catch(Exception ignore) {}
-    }
-
-    /**
-     * Gets the printerId for use with CUPS commands
-     *
-     * @return Id of the printer for use with CUPS commands
-     */
-    public static String getPrinterId(String printerName) {
-        if (CUPS_DESC == null || !CUPS_DESC.containsKey(printerName)) {
-            CUPS_DESC = ShellUtilities.getCupsPrinters();
-        }
-
-        if (SystemUtilities.isMac()) {
-            if (CUPS_DESC.containsKey(printerName)) {
-                return CUPS_DESC.get(printerName);
-            }
-            log.warn("Could not locate printerId matching {}", printerName);
-        }
-        return printerName;
-    }
-
-    public static PrinterResolution getNativeDensity(PrintService service) {
-        if (service == null) { return null; }
-
-        PrinterResolution pRes = (PrinterResolution)service.getDefaultAttributeValue(PrinterResolution.class);
-
-        if (pRes == null && !SystemUtilities.isWindows()) {
-            String printerId = getPrinterId(service.getName());
-
-            if (CUPS_DPI == null || !CUPS_DPI.containsKey(printerId)) {
-                CUPS_DPI = ShellUtilities.getCupsDensities(CUPS_DESC);
-            }
-
-            return CUPS_DPI.get(printerId);
-        }
-
-        log.debug("Found Resolution: {}", pRes);
-        return pRes;
-    }
-
-    public static List<Integer> getSupportedDensities(PrintService service) {
-        List<Integer> densities = new ArrayList<>();
-
-        PrinterResolution[] resSupport = (PrinterResolution[])service.getSupportedAttributeValues(PrinterResolution.class, service.getSupportedDocFlavors()[0], null);
-        if (resSupport != null) {
-            for(PrinterResolution res : resSupport) {
-                densities.add(res.getFeedResolution(ResolutionSyntax.DPI));
-            }
-        }
-
-        return densities;
-    }
-
-    public static String getDriver(PrintService service) {
-        String driver;
-
-        if (SystemUtilities.isWindows()) {
-            String regName = service.getName().replaceAll("\\\\", ",");
-            String keyPath = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers\\" + regName;
-
-            driver = ShellUtilities.execute(new String[] {"reg", "query", keyPath, "/v", "Printer Driver"}, new String[] {"REG_SZ"});
-            if (!driver.isEmpty()) {
-                driver = driver.substring(driver.indexOf("REG_SZ") + 6).trim();
-            } else {
-                String serverName = regName.replaceAll(",,(.+),.+", "$1");
-
-                keyPath = "HKCU\\Printers\\Connections\\" + regName;
-                String guid = ShellUtilities.execute(new String[] {"reg", "query", keyPath, "/v", "GuidPrinter"}, new String[] {"REG_SZ"});
-                if (!guid.isEmpty()) {
-                    guid = guid.substring(guid.indexOf("REG_SZ") + 6).trim();
-
-                    keyPath = "HKLM\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Print\\Providers\\Client Side Rendering Print Provider\\Servers\\" + serverName + "\\Printers\\" + guid;
-                    driver = ShellUtilities.execute(new String[] {"reg", "query", keyPath, "/v", "Printer Driver"}, new String[] {"REG_SZ"});
-                    if (!driver.isEmpty()) {
-                        driver = driver.substring(driver.indexOf("REG_SZ") + 6).trim();
-                    }
-                }
-            }
-        } else {
-            driver = ShellUtilities.execute(new String[] {"lpstat", "-l", "-p", getPrinterId(service.getName())}, new String[] {"Interface:"});
-            if (!driver.isEmpty()) {
-                driver = ShellUtilities.execute(new String[] {"grep", "*PCFileName:", driver.substring(10).trim()}, new String[] {"*PCFileName:"});
-                if (!driver.isEmpty()) {
-                    return driver.substring(12).replace("\"", "").trim();
-                }
-            }
-            /// Assume CUPS, raw
-            return "TEXTONLY.ppd";
-        }
-
-        return driver;
     }
 
     /**

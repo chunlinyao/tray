@@ -8,11 +8,13 @@ import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.utils.ByteUtilities;
+import qz.utils.DeviceUtilities;
 import qz.utils.LoggerUtilities;
 import qz.utils.SerialUtilities;
 
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Locale;
 
 public class SerialOptions {
 
@@ -27,7 +29,10 @@ public class SerialOptions {
     /**
      * Creates an empty/default options object
      */
-    public SerialOptions() {}
+    public SerialOptions() {
+        portSettings = new PortSettings();
+        responseFormat = new ResponseFormat();
+    }
 
     /**
      * Parses the provided JSON object into relevant SerialPort constants
@@ -63,10 +68,17 @@ public class SerialOptions {
                 try { portSettings.flowControl = SerialUtilities.parseFlowControl(serialOpts.getString("flowControl")); }
                 catch(JSONException e) { LoggerUtilities.optionWarn(log, "string", "flowControl", serialOpts.opt("flowControl")); }
             }
+
+            if (!serialOpts.isNull("encoding")) {
+                try { portSettings.encoding =Charset.forName(serialOpts.getString("encoding")); }
+                catch(JSONException e) { LoggerUtilities.optionWarn(log, "string", "encoding", serialOpts.opt("encoding")); }
+            }
         }
 
         if (!serialOpts.isNull("rx")) {
             responseFormat = new ResponseFormat();
+            //Make the response encoding default to the port encoding. If this is removed it will default to UTF-8
+            responseFormat.encoding = portSettings.encoding;
 
             JSONObject respOpts = serialOpts.optJSONObject("rx");
             if (respOpts != null) {
@@ -75,13 +87,13 @@ public class SerialOptions {
                         JSONArray startBits = respOpts.getJSONArray("start");
                         ArrayList<Byte> bytes = new ArrayList<>();
                         for(int i = 0; i < startBits.length(); i++) {
-                            byte[] charByte = SerialUtilities.characterBytes(startBits.getString(i));
+                            byte[] charByte = DeviceUtilities.characterBytes(startBits.getString(i), responseFormat.encoding);
                             for(byte b : charByte) { bytes.add(b); }
                         }
                         responseFormat.boundStart = ArrayUtils.toPrimitive(bytes.toArray(new Byte[0]));
                     }
                     catch(JSONException e) {
-                        try { responseFormat.boundStart = SerialUtilities.characterBytes(respOpts.getString("start")); }
+                        try { responseFormat.boundStart = DeviceUtilities.characterBytes(respOpts.getString("start"), responseFormat.encoding); }
                         catch(JSONException e2) { LoggerUtilities.optionWarn(log, "string", "start", respOpts.opt("start")); }
                     }
                 }
@@ -92,12 +104,17 @@ public class SerialOptions {
                 }
 
                 if (!respOpts.isNull("end")) {
-                    try { responseFormat.boundEnd = SerialUtilities.characterBytes(respOpts.getString("end")); }
+                    try { responseFormat.boundEnd = DeviceUtilities.characterBytes(respOpts.getString("end"), responseFormat.encoding); }
                     catch(JSONException e) { LoggerUtilities.optionWarn(log, "string", "end", respOpts.opt("end")); }
 
                     if (responseFormat.boundStart == null || responseFormat.boundStart.length == 0) {
                         log.warn("End bound set without start bound defined");
                     }
+                }
+
+                if (!respOpts.isNull("untilNewline")) {
+                    try { responseFormat.boundNewline = respOpts.getBoolean("untilNewline"); }
+                    catch(JSONException e) { LoggerUtilities.optionWarn(log, "boolean", "untilNewline", respOpts.opt("untilNewline")); }
                 }
 
                 if (!respOpts.isNull("width")) {
@@ -122,7 +139,7 @@ public class SerialOptions {
                             }
 
                             if (!lengthOpts.isNull("endian")) {
-                                try { responseFormat.length.endian = ByteUtilities.Endian.valueOf(lengthOpts.getString("endian").toUpperCase()); }
+                                try { responseFormat.length.endian = ByteUtilities.Endian.valueOf(lengthOpts.getString("endian").toUpperCase(Locale.ENGLISH)); }
                                 catch(JSONException se) { LoggerUtilities.optionWarn(log, "string", "lengthBytes.endian", lengthOpts.opt("endian")); }
                             }
                         } else {
@@ -175,15 +192,15 @@ public class SerialOptions {
 
             // legacy start only supports string, not an array
             if (!serialOpts.isNull("start")) {
-                responseFormat.boundStart = SerialUtilities.characterBytes(serialOpts.optString("start", DEFAULT_BEGIN));
+                responseFormat.boundStart = DeviceUtilities.characterBytes(serialOpts.optString("start", DEFAULT_BEGIN), responseFormat.encoding);
             } else {
-                responseFormat.boundStart = SerialUtilities.characterBytes(DEFAULT_BEGIN);
+                responseFormat.boundStart = DeviceUtilities.characterBytes(DEFAULT_BEGIN, responseFormat.encoding);
             }
 
             if (!serialOpts.isNull("end")) {
-                responseFormat.boundEnd = SerialUtilities.characterBytes(serialOpts.optString("end", DEFAULT_END));
+                responseFormat.boundEnd = DeviceUtilities.characterBytes(serialOpts.optString("end", DEFAULT_END), responseFormat.encoding);
             } else {
-                responseFormat.boundEnd = SerialUtilities.characterBytes(DEFAULT_END);
+                responseFormat.boundEnd = DeviceUtilities.characterBytes(DEFAULT_END, responseFormat.encoding);
             }
 
             if (!serialOpts.isNull("width")) {
@@ -265,6 +282,7 @@ public class SerialOptions {
         private Charset encoding = Charset.forName("UTF-8");    //Response charset
         private byte[] boundStart;                              //Character(s) denoting start of new response
         private byte[] boundEnd;                                //Character denoting end of a response
+        private boolean boundNewline;                           //If the response should be split on \r?\n
         private int fixedWidth;                                 //Fixed length response bounds
         private ByteParam length;                               //Info about the data length byte(s)
         private ByteParam crc;                                  //Info about the data crc byte(s)
@@ -297,6 +315,10 @@ public class SerialOptions {
 
         public boolean isIncludeStart() {
             return includeStart;
+        }
+
+        public boolean isBoundNewline() {
+            return boundNewline;
         }
     }
 

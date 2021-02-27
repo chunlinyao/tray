@@ -10,6 +10,7 @@
 package qz.utils;
 
 import org.apache.commons.io.Charsets;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.text.translate.CharSequenceTranslator;
 import org.apache.commons.lang3.text.translate.LookupTranslator;
 import org.codehaus.jettison.json.JSONException;
@@ -21,21 +22,31 @@ import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 import qz.auth.Certificate;
+import qz.auth.RequestState;
 import qz.common.ByteArrayBuilder;
 import qz.common.Constants;
+import qz.common.PropertyHelper;
 import qz.communication.FileIO;
 import qz.communication.FileParams;
+import qz.installer.WindowsSpecialFolders;
 import qz.exception.NullCommandException;
+import qz.installer.certificate.CertificateManager;
 import qz.ws.PrintSocketServer;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.*;
-import java.nio.file.AccessDeniedException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+import static qz.common.Constants.ALLOW_FILE;
 
 /**
  * Common static file i/o utilities
@@ -45,6 +56,103 @@ import java.util.*;
 public class FileUtilities {
 
     private static final Logger log = LoggerFactory.getLogger(FileUtilities.class);
+    public static final Path USER_DIR = getUserDirectory();
+    public static final Path SHARED_DIR = getSharedDirectory();
+    public static final Path TEMP_DIR = getTempDirectory();
+    public static final char FILE_SEPARATOR = ';';
+    public static final char FIELD_SEPARATOR = '|';
+    public static final char ESCAPE_CHAR = '^';
+
+    /**
+     * Zips up the USER_DIR, places on desktop with timestamp
+     */
+    public static boolean zipLogs() {
+        String date = new SimpleDateFormat("yyyy-MM-dd_HHmm").format(new Date());
+        String filename = Constants.DATA_DIR + "-" + date + ".zip";
+        Path destination = Paths.get(System.getProperty("user.home"), "Desktop", filename);
+
+        try {
+            zipDirectory(USER_DIR, destination);
+            log.info("Zipped the contents of {} and placed the resulting files in {}", USER_DIR, destination);
+            return true;
+        } catch(IOException e) {
+            log.warn("Could not create zip file: {}", destination, e);
+        }
+        return false;
+    }
+
+    protected static void zipDirectory(Path sourceDir, Path outputFile) throws IOException {
+        final ZipOutputStream outputStream = new ZipOutputStream(new FileOutputStream(outputFile.toFile()));
+        Files.walkFileTree(sourceDir, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                try {
+                    Path targetFile = sourceDir.relativize(file);
+                    outputStream.putNextEntry(new ZipEntry(targetFile.toString()));
+                    byte[] bytes = Files.readAllBytes(file);
+                    outputStream.write(bytes, 0, bytes.length);
+                    outputStream.closeEntry();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        outputStream.close();
+    }
+
+    /**
+     * Location where preferences and logs are kept
+     */
+    private static Path getUserDirectory() {
+        if(SystemUtilities.isWindows()) {
+            return Paths.get(WindowsSpecialFolders.ROAMING_APPDATA.getPath(), Constants.DATA_DIR);
+        } else if(SystemUtilities.isMac()) {
+            return Paths.get(System.getProperty("user.home"), "/Library/Application Support/", Constants.DATA_DIR);
+        } else {
+            return Paths.get(System.getProperty("user.home"), "." + Constants.DATA_DIR);
+        }
+    }
+
+    /**
+     * Location where shared preferences are kept, such as .autostart
+     */
+    private static Path getSharedDirectory() {
+        if(SystemUtilities.isWindows()) {
+            return Paths.get(WindowsSpecialFolders.PROGRAM_DATA.getPath(), Constants.DATA_DIR);
+        } else if(SystemUtilities.isMac()) {
+            return Paths.get("/Library/Application Support/", Constants.DATA_DIR);
+        } else {
+            return Paths.get("/srv/", Constants.DATA_DIR);
+        }
+    }
+
+    public static boolean childOf(File childFile, Path parentPath) {
+        Path child = childFile.toPath().toAbsolutePath();
+        Path parent = parentPath.toAbsolutePath();
+        if(SystemUtilities.isWindows()) {
+            return child.toString().toLowerCase(Locale.ENGLISH).startsWith(parent.toString().toLowerCase(Locale.ENGLISH));
+        }
+        return child.toString().startsWith(parent.toString());
+    }
+
+    public static Path inheritParentPermissions(Path filePath) {
+        if(SystemUtilities.isWindows()) {
+            // assume permissions are inherited
+        } else {
+            // assume permissions are not inherited
+            try {
+                FileAttribute<Set<PosixFilePermission>> attributes = PosixFilePermissions.asFileAttribute(Files.getPosixFilePermissions(filePath.getParent()));
+                Files.setPosixFilePermissions(filePath, attributes.value());
+                // Remove execute flag
+                filePath.toFile().setExecutable(false, false);
+            } catch(IOException e) {
+                log.warn("Unable to inherit file permissions {}", filePath, e);
+            }
+        }
+        return filePath;
+
+    }
 
     private static final String[] badExtensions = new String[] {
             "exe", "pif", "paf", "application", "msi", "com", "cmd", "bat", "lnk", // Windows Executable program or script
@@ -73,17 +181,17 @@ public class FileUtilities {
     };
 
     private static final CharSequenceTranslator translator = new LookupTranslator(new String[][] {
-            {"^", "^^"},
-            {"\\", "^b"},
-            {"/", "^f"},
-            {":", "^c"},
-            {"*", "^a"},
-            {"?", "^m"},
-            {"\"", "^q"},
-            {"<", "^g"},
-            {">", "^l"},
-            {"|", "^p"},
-            {"" + (char)0x7f, "^d"}
+            {"" + ESCAPE_CHAR, "" + ESCAPE_CHAR + ESCAPE_CHAR},
+            {"\\", ESCAPE_CHAR + "b"},
+            {"/", ESCAPE_CHAR + "f"},
+            {":", ESCAPE_CHAR + "c"},
+            {"*", ESCAPE_CHAR + "a"},
+            {"?", ESCAPE_CHAR + "m"},
+            {"\"", ESCAPE_CHAR + "q"},
+            {"<", ESCAPE_CHAR + "g"},
+            {">", ESCAPE_CHAR + "l"},
+            {"|", ESCAPE_CHAR + "p"},
+            {"" + (char)0x7f, ESCAPE_CHAR + "d"}
     });
 
     /* resource files */
@@ -91,14 +199,14 @@ public class FileUtilities {
     private static HashMap<String,File> sharedFileMap = new HashMap<>();
     private static ArrayList<Map.Entry<Path,String>> whiteList;
 
-    public static Path getAbsolutePath(JSONObject params, Certificate cert, boolean allowRootDir) throws JSONException, IOException {
+    public static Path getAbsolutePath(JSONObject params, RequestState request, boolean allowRootDir) throws JSONException, IOException {
         FileParams fp = new FileParams(params);
-        String commonName = cert.isTrusted()? escapeFileName(cert.getCommonName()):"UNTRUSTED";
+        String commonName = request.isVerified()? escapeFileName(request.getCertName()):"UNTRUSTED";
 
         Path path = createAbsolutePath(fp, commonName);
         initializeRootFolder(fp, commonName);
 
-        if (!isWhiteListed(path, allowRootDir, fp.isSandbox(), cert)) {
+        if (!isWhiteListed(path, allowRootDir, fp.isSandbox(), request.getCertUsed())) {
             throw new AccessDeniedException(path.toString());
         }
 
@@ -112,17 +220,20 @@ public class FileUtilities {
     }
 
     private static void initializeRootFolder(FileParams fileParams, String commonName) throws IOException {
-        String parent = fileParams.isShared()? SystemUtilities.getSharedDataDirectory():SystemUtilities.getDataDirectory();
+        Path parent = fileParams.isShared()? SHARED_DIR:USER_DIR;
 
         Path rootPath;
         if (fileParams.isSandbox()) {
-            rootPath = Paths.get(parent, Constants.SANDBOX_DIR, commonName);
+            rootPath = Paths.get(parent.toString(), FileIO.SANDBOX_DATA_SUFFIX, commonName);
         } else {
-            rootPath = Paths.get(parent, Constants.NOT_SANDBOX_DIR);
+            rootPath = Paths.get(parent.toString(), FileIO.GLOBAL_DATA_SUFFIX);
         }
 
         if (!Files.exists(rootPath)) {
             Files.createDirectories(rootPath);
+            if(fileParams.isShared()) {
+                rootPath.toFile().setWritable(true, false);
+            }
         }
     }
 
@@ -141,11 +252,11 @@ public class FileUtilities {
         if (fileParams.getPath().isAbsolute()) {
             sanitizedPath = fileParams.getPath();
         } else {
-            String parent = fileParams.isShared()? SystemUtilities.getSharedDataDirectory():SystemUtilities.getDataDirectory();
+            Path parent = fileParams.isShared()? SHARED_DIR:USER_DIR;
             if (fileParams.isSandbox()) {
-                sanitizedPath = Paths.get(parent, Constants.SANDBOX_DIR, commonName).resolve(fileParams.getPath());
+                sanitizedPath = Paths.get(parent.toString(), FileIO.SANDBOX_DATA_SUFFIX, commonName).resolve(fileParams.getPath());
             } else {
-                sanitizedPath = Paths.get(parent, Constants.NOT_SANDBOX_DIR).resolve(fileParams.getPath());
+                sanitizedPath = Paths.get(parent.toString(), FileIO.GLOBAL_DATA_SUFFIX).resolve(fileParams.getPath());
             }
         }
 
@@ -165,7 +276,7 @@ public class FileUtilities {
         String[] tokens = fileName.split("\\.(?=[^.]+$)");
         if (tokens.length == 2) {
             String extension = tokens[1];
-            for(String bad : FileUtilities.badExtensions) {
+            for(String bad : badExtensions) {
                 if (bad.equalsIgnoreCase(extension)) {
                     return false;
                 }
@@ -182,20 +293,24 @@ public class FileUtilities {
     public static boolean isWhiteListed(Path path, boolean allowRootDir, boolean sandbox, Certificate cert) {
         String commonName = cert.isTrusted()? escapeFileName(cert.getCommonName()):"UNTRUSTED";
         if (whiteList == null) {
-            populateWhiteList();
+            whiteList = new ArrayList<>();
+            //default sandbox locations. More can be added through the properties file
+            whiteList.add(new AbstractMap.SimpleEntry<>(USER_DIR, FIELD_SEPARATOR + "sandbox" + FIELD_SEPARATOR));
+            whiteList.add(new AbstractMap.SimpleEntry<>(SHARED_DIR, FIELD_SEPARATOR + "sandbox" + FIELD_SEPARATOR));
+            whiteList.addAll(parseDelimitedPaths(getFileAllowProperty(PrintSocketServer.getTrayProperties()).toString()));
         }
 
         Path cleanPath = path.normalize().toAbsolutePath();
         for(Map.Entry<Path,String> allowed : whiteList) {
             if (cleanPath.startsWith(allowed.getKey())) {
-                if ("".equals(allowed.getValue()) || allowed.getValue().contains("|" + commonName + "|") && (allowRootDir || !cleanPath.equals(allowed.getKey()))) {
+                if ("".equals(allowed.getValue()) || allowed.getValue().contains(FIELD_SEPARATOR + commonName + FIELD_SEPARATOR) && (allowRootDir || !cleanPath.equals(allowed.getKey()))) {
                     return true;
-                } else if (allowed.getValue().contains("|sandbox|")) {
+                } else if (allowed.getValue().contains(FIELD_SEPARATOR + "sandbox" + FIELD_SEPARATOR)) {
                     Path p;
                     if (sandbox) {
-                        p = Paths.get(allowed.getKey().toString(), Constants.SANDBOX_DIR, commonName);
+                        p = Paths.get(allowed.getKey().toString(), FileIO.SANDBOX_DATA_SUFFIX, commonName);
                     } else {
-                        p = Paths.get(allowed.getKey().toString(), Constants.NOT_SANDBOX_DIR);
+                        p = Paths.get(allowed.getKey().toString(), FileIO.GLOBAL_DATA_SUFFIX);
                     }
                     if (cleanPath.startsWith(p) && (allowRootDir || !cleanPath.equals(p))) {
                         return true;
@@ -206,58 +321,179 @@ public class FileUtilities {
         return false;
     }
 
-    private static void populateWhiteList() {
-        whiteList = new ArrayList<>();
-        //default sandbox locations. More can be added through the properties file
-        whiteList.add(new AbstractMap.SimpleEntry<>(Paths.get(SystemUtilities.getDataDirectory()), "|sandbox|"));
-        whiteList.add(new AbstractMap.SimpleEntry<>(Paths.get(SystemUtilities.getSharedDataDirectory()), "|sandbox|"));
+    public static String getParentDirectory(String filePath) {
+        // Working path should always default to the JARs parent folder
+        int lastSlash = filePath.lastIndexOf(File.separator);
+        return lastSlash < 0? "":filePath.substring(0, lastSlash);
+    }
 
-        Properties props = PrintSocketServer.getTrayProperties();
-        if (props != null) {
-            StringBuilder propString = new StringBuilder(props.getProperty("file.whitelist", ""));
+    public static ArgParser.ExitStatus addFileAllowProperty(String path, String commonName) throws IOException {
+        PropertyHelper props = new PropertyHelper(new File(CertificateManager.getWritableLocation(), Constants.PROPS_FILE + ".properties"));
+        ArrayList<Map.Entry<Path, String>> paths = parseDelimitedPaths(getFileAllowProperty(props).toString(), false);
+        Iterator<Map.Entry<Path, String>> iterator = paths.iterator();
+        String commonNameEscaped = escapePathProperty(commonName);
+        // First, iterate to see if the path already exists
+        boolean found = false;
+        boolean updated = false;
+        while(iterator.hasNext()) {
+            Map.Entry<Path, String> value = iterator.next();
+            if(value.getKey().toString().equals(path)) {
+                found = true;
+                if(!commonNameEscaped.isEmpty() && !value.getValue().contains(commonNameEscaped)) {
+                    value.setValue((value.getValue().isEmpty() ? FIELD_SEPARATOR : value.getValue()) + commonNameEscaped + FIELD_SEPARATOR);
+                    updated = true;
+                }
+            }
+        }
+        if(!found) {
+            paths.add(new AbstractMap.SimpleEntry<>(Paths.get(path).normalize().toAbsolutePath(), commonNameEscaped.isEmpty() ? "" : FIELD_SEPARATOR + commonNameEscaped + FIELD_SEPARATOR));
+            updated = true;
+        }
+        if(updated) {
+            if(saveFileAllowProperty(props, paths)) {
+                log.info("Added \"file.allow\" entry to {}.properties.", Constants.PROPS_FILE);
+                return ArgParser.ExitStatus.SUCCESS;
+            }
+            return ArgParser.ExitStatus.GENERAL_ERROR;
+        } else {
+            log.warn("Skipping \"file.allow\" entry in {}.properties, it already exist.", Constants.PROPS_FILE);
+            return ArgParser.ExitStatus.SUCCESS;
+        }
+    }
+
+    public static ArgParser.ExitStatus removeFileAllowProperty(String path) throws IOException {
+        PropertyHelper props = new PropertyHelper(new File(CertificateManager.getWritableLocation(), Constants.PROPS_FILE + ".properties"));
+        ArrayList<Map.Entry<Path, String>> paths = parseDelimitedPaths(getFileAllowProperty(props).toString(), false);
+
+        int before = paths.size();
+        Iterator<Map.Entry<Path, String>> iterator = paths.iterator();
+        while(iterator.hasNext()) {
+            Map.Entry<Path, String> value = iterator.next();
+            if(value.getKey().toString().equals(path)) {
+                iterator.remove();
+            }
+        }
+        if(paths.size() != before) {
+            if(saveFileAllowProperty(props, paths)) {
+                log.info("Removed \"file.allow\" entry from {}.properties.", Constants.PROPS_FILE);
+                return ArgParser.ExitStatus.SUCCESS;
+            }
+            return ArgParser.ExitStatus.GENERAL_ERROR;
+        } else {
+            log.warn("Skipping \"file.allow\" entry in {}.properties, it doesn't exist.", Constants.PROPS_FILE);
+            return ArgParser.ExitStatus.SUCCESS;
+        }
+    }
+
+    private static boolean saveFileAllowProperty(PropertyHelper props, ArrayList<Map.Entry<Path, String>> paths) {
+        StringBuilder fileAllow = new StringBuilder();
+        for(Map.Entry<Path, String> path : paths) {
+            fileAllow
+                    .append(escapePathProperty(path.getKey().toString()))
+                    .append(path.getValue())
+                    .append(FILE_SEPARATOR);
+        }
+        props.remove("file.whitelist");
+        props.remove("file.allow");
+        if(fileAllow.length() > 0) {
+            props.setProperty("file.allow", fileAllow.toString());
+        }
+        return props.save();
+    }
+
+    /**
+     * Escapes <code>ESCAPE_CHARACTER</code>, <code>FILE_SEPARATOR</code> and <code>FIELD_SEPARATOR</code>
+     * so it a multi-value file path can be safely parsed later
+     */
+    private static String escapePathProperty(String path) {
+        return path == null ? "" : path
+                .replace("" + ESCAPE_CHAR, ("" + ESCAPE_CHAR) + ESCAPE_CHAR)
+                .replace("" + FILE_SEPARATOR, ("" + ESCAPE_CHAR) + FILE_SEPARATOR)
+                .replace("" + FIELD_SEPARATOR, ("" + ESCAPE_CHAR) + FIELD_SEPARATOR);
+    }
+
+    private static StringBuilder getFileAllowProperty(Properties props) {
+        StringBuilder propString = new StringBuilder();
+        if(props != null) {
+            propString.append(props.getProperty("file.allow", ""));
+            if (propString.length() == 0) {
+                // Deprecated
+                propString.append(props.getProperty("file.whitelist", ""));
+                if (propString.length() > 0) {
+                    log.warn("Property \"file.whitelist\" is deprecated and will be removed in a future version.  Please use \"file.allow\" instead.");
+                }
+            }
+        }
+        return propString;
+    }
+
+    /**
+     * Parses semi-colon delimited paths with optional pipe-delimited descriptions
+     * e.g. C:\file1.txt;C:\file2.txt
+     *      C:\file1.txt|ABC Inc.;C:\file2.txt|XYZ Inc.
+     */
+    public static ArrayList<Map.Entry<Path, String>> parseDelimitedPaths(String delimited, boolean escapeCommonNames) {
+        ArrayList<Map.Entry<Path, String>> foundPaths = new ArrayList<>();
+        if (delimited != null) {
+            StringBuilder propString = new StringBuilder(delimited);
             boolean escaped = false;
             boolean resetPending = false, tokenPending = false;
             ArrayList<String> tokens = new ArrayList<>();
-            //unescaper and tokenizer
+            //unescape and tokenize
             for(int i = 0; i < propString.length(); i++) {
                 char iteratingChar = propString.charAt(i);
                 //if the char before this was an escape char, we are no longer escaped and we skip delimiter detection
                 if (escaped) {
                     escaped = false;
                 } else {
-                    if (iteratingChar == '^') {
+                    if (iteratingChar == ESCAPE_CHAR) {
                         escaped = true;
                         propString.deleteCharAt(i);
                         i--;
                     } else {
-                        tokenPending = iteratingChar == '|' || iteratingChar == ';';
-                        resetPending = iteratingChar == ';';
+                        tokenPending = iteratingChar == FIELD_SEPARATOR || iteratingChar == FILE_SEPARATOR;
+                        resetPending = iteratingChar == FILE_SEPARATOR;
                     }
                 }
-                //If the last char isn't a ; or |
-                if (i == propString.length() - 1) {
-                    tokenPending = true;
-                    resetPending = true;
-                }
+                boolean lastChar = (i == propString.length() - 1);
                 //if a delimiter is found, save string to token and delete it from propString
-                if (tokenPending) {
-                    tokenPending = false;
-                    tokens.add(propString.substring(0, i));
+                if (tokenPending || lastChar) {
+                    String token = propString.substring(0, lastChar && !tokenPending ? i + 1 : i);
+                    if (!token.isEmpty()) tokens.add(token);
                     propString.delete(0, i + 1);
                     i = -1;
+                    tokenPending = false;
                 }
                 //if a semicolon was found or we are on the last char of the string, dump the tokens into a pair and add it to whiteList
-                if (resetPending) {
+                if (resetPending || lastChar) {
                     resetPending = false;
-                    String commonNames = tokens.size() > 1? "|":"";
+                    String commonNames = tokens.size() > 1? "" + FIELD_SEPARATOR:"";
                     for(int n = 1; n < tokens.size(); n++) {
-                        commonNames += escapeFileName(tokens.get(n)) + "|";
+                        if(escapeCommonNames) {
+                            commonNames += escapeFileName(tokens.get(n)) + FIELD_SEPARATOR;
+                        } else {
+                            // We still need to maintain some level of escaping for reserved characters
+                            // this is just going to cause headaches later, but we don't have much choice
+                            commonNames += escapePathProperty(tokens.get(n));
+                            if(!commonNames.endsWith("" + FIELD_SEPARATOR)) {
+                                commonNames += FIELD_SEPARATOR;
+                            }
+                        }
                     }
-                    whiteList.add(new AbstractMap.SimpleEntry<>(Paths.get(tokens.get(0)).normalize().toAbsolutePath(), commonNames));
+                    foundPaths.add(new AbstractMap.SimpleEntry<>(Paths.get(tokens.get(0)).normalize().toAbsolutePath(), commonNames));
                     tokens.clear();
                 }
             }
         }
+        return foundPaths;
+    }
+
+    public static ArrayList<Map.Entry<Path, String>> parseDelimitedPaths(String delimited) {
+        return parseDelimitedPaths(delimited, true);
+    }
+
+    public static ArrayList<Map.Entry<Path, String>> parseDelimitedPaths(Properties props, String key) {
+        return parseDelimitedPaths(props == null ? null : props.getProperty(key));
     }
 
     /**
@@ -268,16 +504,11 @@ public class FileUtilities {
      * @return {@code true} if restricted, {@code false} otherwise
      */
     public static boolean isBadPath(String path) {
-        if (SystemUtilities.isWindows()) {
-            // Case insensitive
-            return path.toLowerCase().contains(SystemUtilities.getDataDirectory().toLowerCase());
-        }
-
-        return path.contains(SystemUtilities.getDataDirectory());
+        return childOf(new File(path), USER_DIR);
     }
 
     /**
-     * Escapes invalid chars from filenames. This does not cause collisions. Escape char is "^"
+     * Escapes invalid chars from filenames. This does not cause collisions. Escape char is <code>ESCAPE_CHAR</code>
      * Characters escaped, ^ \ / : * ? " < > |</>
      * Warning: Restricted filenames such as lpt1, com1, aux... are not escaped by this function
      *
@@ -289,30 +520,10 @@ public class FileUtilities {
         for(int n = returnStringBuilder.length() - 1; n >= 0; n--) {
             char c = returnStringBuilder.charAt(n);
             if (c < 0x20) {
-                returnStringBuilder.replace(n, n + 1, "^" + String.format("%02d", (int)c));
+                returnStringBuilder.replace(n, n + 1, ESCAPE_CHAR + String.format("%02d", (int)c));
             }
         }
         return returnStringBuilder.toString();
-    }
-
-    public static boolean isSymlink(String filePath) {
-        log.info("Verifying symbolic link: {}", filePath);
-        boolean returnVal = false;
-        if (filePath != null) {
-            File f = new File(filePath);
-            if (f.exists()) {
-                try {
-                    File canonicalFile = (f.getParent() == null? f:f.getParentFile().getCanonicalFile());
-                    returnVal = !canonicalFile.getCanonicalFile().equals(canonicalFile.getAbsoluteFile());
-                }
-                catch(IOException ex) {
-                    log.error("IOException checking for symlink", ex);
-                }
-            }
-        }
-
-        log.info("Symbolic link result: {}", returnVal);
-        return returnVal;
     }
 
     public static String readLocalFile(String file) throws IOException {
@@ -369,8 +580,8 @@ public class FileUtilities {
     }
 
 
-    public static boolean printLineToFile(String fileName, String message) {
-        File file = getFile(fileName, true);
+    public static boolean printLineToFile(String fileName, String message, boolean local) {
+        File file = getFile(fileName, local);
         if (file == null) { return false; }
 
         try(FileWriter fw = new FileWriter(file, true)) {
@@ -386,6 +597,10 @@ public class FileUtilities {
         return false;
     }
 
+    public static boolean printLineToFile(String fileName, String message) {
+        return printLineToFile(fileName, message, true);
+    }
+
     public static File getFile(String name, boolean local) {
         HashMap<String,File> fileMap;
         if (local) {
@@ -395,29 +610,26 @@ public class FileUtilities {
         }
 
         if (!fileMap.containsKey(name) || fileMap.get(name) == null) {
-            String fileLoc;
-            if (local) {
-                fileLoc = SystemUtilities.getDataDirectory();
-            } else {
-                fileLoc = SystemUtilities.getSharedDirectory();
-            }
-
-            File locDir = new File(fileLoc);
-            File file = new File(fileLoc + File.separator + name + ".dat");
+            File path = local ? USER_DIR.toFile() : SHARED_DIR.toFile();
+            File dat = Paths.get(path.toString(),  name + ".dat").toFile();
 
             try {
-                locDir.mkdirs();
-                file.createNewFile();
+                path.mkdirs();
+                dat.createNewFile();
+                if(!local) {
+                    dat.setReadable(true, false);
+                    dat.setWritable(true, false);
+                }
             }
             catch(IOException e) {
                 //failure is possible due to user permissions on shared files
                 if (local || (!name.equals(Constants.ALLOW_FILE) && !name.equals(Constants.BLOCK_FILE))) {
-                    log.warn("Cannot setup file {} ({})", fileLoc, local? "Local":"Shared", e);
+                    log.warn("Cannot setup file {} ({})", dat, local? "Local":"Shared", e);
                 }
             }
 
-            if (file.exists()) {
-                fileMap.put(name, file);
+            if (dat.exists()) {
+                fileMap.put(name, dat);
             }
         }
 
@@ -433,6 +645,17 @@ public class FileUtilities {
         }
 
         localFileMap.put(name, null);
+    }
+
+    public static ArgParser.ExitStatus addToCertList(String list, File certFile) throws Exception {
+        FileReader fr = new FileReader(certFile);
+        Certificate cert = new Certificate(IOUtils.toString(fr));
+        if(FileUtilities.printLineToFile(list, cert.data(), !SystemUtilities.isAdmin())) {
+            log.info("Successfully added {} to {} list", cert.getOrganization(), ALLOW_FILE);
+            return ArgParser.ExitStatus.SUCCESS;
+        }
+        log.error("Failed to add {} to {} list", cert.getOrganization(), ALLOW_FILE);
+        return ArgParser.ExitStatus.GENERAL_ERROR;
     }
 
     public static boolean deleteFromFile(String fileName, String deleteLine) {
@@ -460,4 +683,149 @@ public class FileUtilities {
         }
     }
 
+    /**
+     *
+     * @return First line of ".autostart" file in user or shared space or "0" if blank.  If neither are found, returns "1".
+     * @throws IOException
+     */
+    private static String readAutoStartFile() throws IOException {
+        log.debug("Checking for {} preference in user directory {}...", Constants.AUTOSTART_FILE, USER_DIR);
+        Path userAutoStart = Paths.get(USER_DIR.toString(), Constants.AUTOSTART_FILE);
+        List<String> lines = null;
+        if (Files.exists(userAutoStart)) {
+            lines = Files.readAllLines(userAutoStart);
+        } else {
+            log.debug("Checking for {} preference in shared directory {}...", Constants.AUTOSTART_FILE, SHARED_DIR);
+            Path sharedAutoStart = Paths.get(SHARED_DIR.toString(), Constants.AUTOSTART_FILE);
+            if (Files.exists(sharedAutoStart)) {
+                lines = Files.readAllLines(sharedAutoStart);
+            }
+        }
+        if (lines == null) {
+            return "1";
+        } else if (lines.isEmpty()) {
+            log.warn("File {} is empty, this shouldn't happen.", Constants.AUTOSTART_FILE);
+            return "0";
+        } else {
+            String val = lines.get(0).trim();
+            log.debug("Autostart preference {} contains {}", Constants.AUTOSTART_FILE, val);
+            return val;
+        }
+    }
+
+    private static boolean writeAutoStartFile(String mode) throws IOException {
+        Path autostartFile = Paths.get(USER_DIR.toString(), Constants.AUTOSTART_FILE);
+        Files.write(autostartFile, mode.getBytes(), StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        return readAutoStartFile().equals(mode);
+    }
+
+    public static boolean setAutostart(boolean autostart) {
+        try {
+            return writeAutoStartFile(autostart ? "1": "0");
+        }
+        catch(IOException e) {
+            return false;
+        }
+    }
+
+    public static boolean isAutostart() {
+        try {
+            return "1".equals(readAutoStartFile());
+        }
+        catch(IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Configures the given embedded resource file using qz.common.Constants combined with the provided
+     * HashMap and writes to the specified location
+     *
+     * Will look for resource relative to relativeClass package location.
+     */
+    public static void configureAssetFile(String relativeAsset, File dest, HashMap<String, String> additionalMappings, Class relativeClass) throws IOException {
+        // Static fields, parsed from qz.common.Constants
+        List<Field> fields = new ArrayList<>();
+        HashMap<String, String> allMappings = (HashMap<String, String>)additionalMappings.clone();
+        fields.addAll(Arrays.asList(Constants.class.getFields())); // public only
+        for(Field field : fields) {
+            if (Modifier.isStatic(field.getModifiers())) { // static only
+                try {
+                    String key = "%" + field.getName() + "%";
+                    Object value = field.get(null);
+                    if (value != null) {
+                        if (value instanceof String) {
+                            allMappings.putIfAbsent(key, (String)value);
+                        } else if(value instanceof Boolean) {
+                            allMappings.putIfAbsent(key, "" + field.getBoolean(null));
+                        }
+                    }
+                }
+                catch(IllegalAccessException e) {
+                    // This should never happen; we are only using public fields
+                    log.warn("{} occurred fetching a value for {}", e.getClass().getName(), field.getName(), e);
+                }
+            }
+        }
+
+        BufferedReader reader = new BufferedReader(new InputStreamReader(relativeClass.getResourceAsStream(relativeAsset)));
+        BufferedWriter writer = new BufferedWriter(new FileWriter(dest));
+
+        String line;
+        while((line = reader.readLine()) != null) {
+            for(Map.Entry<String, String> mapping : allMappings.entrySet()) {
+                if (line.contains(mapping.getKey())) {
+                    line = line.replaceAll(mapping.getKey(), mapping.getValue());
+                }
+            }
+            writer.write(line + "\n");
+        }
+        reader.close();
+        writer.close();
+    }
+
+
+    public static Path getTempDirectory() {
+        try {
+            return Files.createTempDirectory(Constants.DATA_DIR);
+        } catch(IOException e) {
+            log.warn("We couldn't get a temp directory for writing.  This could cause some items to break");
+        }
+        return null;
+    }
+
+    public static void setPermissionsParentally(Path toTraverse, boolean worldWrite) {
+        Path stepper = toTraverse.toAbsolutePath();
+        // Assume we shouldn't go higher than 2nd-level (e.g. "/etc", "C:\Program Files\", etc)
+        while(stepper.getParent() != null && !stepper.getRoot().equals(stepper.getParent())) {
+            File file = stepper.toFile();
+            file.setReadable(true, false);
+            file.setExecutable(true, false);
+            file.setWritable(true, !worldWrite);
+            if (SystemUtilities.isWindows() && worldWrite) {
+                WindowsUtilities.setWritable(stepper);
+            }
+            stepper = stepper.getParent();
+        }
+    }
+
+    public static void setPermissionsRecursively(Path toRecurse, boolean worldWrite) {
+        try (Stream<Path> paths = Files.walk(toRecurse)) {
+            paths.forEach((path)->{
+                if(SystemUtilities.isWindows() && worldWrite) {
+                    // By default, NSIS sets owner to "Administrator", preventing non-admins from writing
+                    // Add "Authenticated Users" write permission using
+                    WindowsUtilities.setWritable(path);
+                }
+                if (path.toFile().isDirectory()) {
+                    // Executable bit in Unix allows listing files
+                    path.toFile().setExecutable(true, false);
+                }
+                path.toFile().setReadable(true, false);
+                path.toFile().setWritable(true, !worldWrite);
+            });
+        } catch (IOException e) {
+            log.warn("An error occurred setting permissions: {}", toRecurse);
+        }
+    }
 }

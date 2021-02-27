@@ -2,6 +2,7 @@ package qz.common;
 
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -39,16 +40,25 @@ public class PropertyHelper extends Properties {
         load(file);
     }
 
+    public PropertyHelper(File file) {
+        this(file == null ? null : file.getAbsolutePath());
+    }
+
     public boolean getBoolean(String key, boolean defaultVal) {
-        try {
-            return Boolean.parseBoolean(getProperty(key));
-        } catch (Throwable t) {
+        String prop = getProperty(key);
+        if (prop != null) {
+            return Boolean.parseBoolean(prop);
+        } else {
             return defaultVal;
         }
     }
 
     public void setProperty(String key, boolean value) {
         setProperty(key, "" + value);
+    }
+
+    public void load(File file) {
+        load(file == null ? null : file.getAbsolutePath());
     }
 
     public void load(String file) {
@@ -65,11 +75,13 @@ public class PropertyHelper extends Properties {
         }
     }
 
-    public void save() {
+    public boolean save() {
+        boolean success = false;
         FileOutputStream f = null;
         try {
             f = new FileOutputStream(file);
             this.store(f, null);
+            success = true;
         } catch (IOException e) {
             log.error("Error saving file: {}", file, e);
         } finally {
@@ -77,5 +89,6 @@ public class PropertyHelper extends Properties {
                 try { f.close(); } catch(Throwable ignore) {};
             }
         }
+        return success;
     }
 }

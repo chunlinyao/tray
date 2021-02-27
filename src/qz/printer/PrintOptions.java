@@ -14,10 +14,12 @@ import javax.print.attribute.Size2DSyntax;
 import javax.print.attribute.standard.Chromaticity;
 import javax.print.attribute.standard.OrientationRequested;
 import javax.print.attribute.standard.PrinterResolution;
+import javax.print.attribute.standard.Sides;
 import java.awt.*;
 import java.awt.print.PageFormat;
 import java.awt.print.PrinterException;
 import java.awt.print.PrinterJob;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -50,15 +52,30 @@ public class PrintOptions {
         if (!configOpts.isNull("encoding")) {
             rawOptions.encoding = configOpts.optString("encoding", null);
         }
-        if (!configOpts.isNull("endOfDoc")) {
-            rawOptions.endOfDoc = configOpts.optString("endOfDoc", null);
-        }
-        if (!configOpts.isNull("language")) {
-            rawOptions.language = configOpts.optString("language", null);
-        }
-        if (!configOpts.isNull("perSpool")) {
-            try { rawOptions.perSpool = configOpts.getInt("perSpool"); }
-            catch(JSONException e) { LoggerUtilities.optionWarn(log, "integer", "perSpool", configOpts.opt("perSpool")); }
+        if (!configOpts.isNull("spool")) {
+            JSONObject spool = configOpts.optJSONObject("spool");
+            if (spool != null) {
+                if (!spool.isNull("size")) {
+                    try { rawOptions.spoolSize = spool.getInt("size"); }
+                    catch(JSONException e) { LoggerUtilities.optionWarn(log, "integer", "spool.size", spool.opt("size")); }
+                }
+                // TODO: Implement spool.start
+                if (!spool.isNull("end")) {
+                    rawOptions.spoolEnd = spool.optString("end");
+                }
+
+            } else {
+                LoggerUtilities.optionWarn(log, "JSONObject", "spool", configOpts.opt("spool"));
+            }
+        } else {
+            // Deprecated
+            if (!configOpts.isNull("perSpool")) {
+                try { rawOptions.spoolSize = configOpts.getInt("perSpool"); }
+                catch(JSONException e) { LoggerUtilities.optionWarn(log, "integer", "perSpool", configOpts.opt("perSpool")); }
+            }
+            if (!configOpts.isNull("endOfDoc")) {
+                rawOptions.spoolEnd = configOpts.optString("endOfDoc", null);
+            }
         }
         if (!configOpts.isNull("copies")) {
             try { rawOptions.copies = configOpts.getInt("copies"); }
@@ -69,6 +86,27 @@ public class PrintOptions {
         }
 
         //check for pixel options
+        if (!configOpts.isNull("units")) {
+            switch(configOpts.optString("units")) {
+                case "mm":
+                    psOptions.units = Unit.MM; break;
+                case "cm":
+                    psOptions.units = Unit.CM; break;
+                case "in":
+                    psOptions.units = Unit.INCH; break;
+                default:
+                    LoggerUtilities.optionWarn(log, "valid value", "units", configOpts.opt("units")); break;
+            }
+        }
+        if (!configOpts.isNull("bounds")) {
+            try {
+                JSONObject bounds = configOpts.getJSONObject("bounds");
+                psOptions.bounds = new Bounds(bounds.optDouble("x", 0), bounds.optDouble("y", 0), bounds.optDouble("width", 0), bounds.optDouble("height", 0));
+            }
+            catch(JSONException e) {
+                LoggerUtilities.optionWarn(log, "JSONObject", "bounds", configOpts.opt("bounds"));
+            }
+        }
         if (!configOpts.isNull("colorType")) {
             try {
                 psOptions.colorType = ColorType.valueOf(configOpts.optString("colorType").toUpperCase(Locale.ENGLISH));
@@ -86,29 +124,81 @@ public class PrintOptions {
             }
         }
         if (!configOpts.isNull("density")) {
-            JSONArray possibleDPIs = configOpts.optJSONArray("density");
-            if (possibleDPIs != null && possibleDPIs.length() > 0) {
-                int usableDpi = -1;
+            JSONObject asymmDPI = configOpts.optJSONObject("density");
+            if (asymmDPI != null) {
+                psOptions.density = asymmDPI.optInt("feed");
+                psOptions.crossDensity = asymmDPI.optInt("cross");
+            } else {
+                List<PrinterResolution> rSupport = output.isSetService() ?
+                        output.getNativePrinter().getResolutions() : new ArrayList<>();
 
-                List<Integer> rSupport = PrintingUtilities.getSupportedDensities(output.getPrintService());
-                if (!rSupport.isEmpty()) {
-                    for(int i = 0; i < possibleDPIs.length(); i++) {
-                        if (rSupport.contains(possibleDPIs.optInt(i))) {
-                            usableDpi = possibleDPIs.optInt(i);
-                            break;
+                JSONArray possibleDPIs = configOpts.optJSONArray("density");
+                if (possibleDPIs != null && possibleDPIs.length() > 0) {
+                    PrinterResolution usableRes = null;
+
+                    if (!rSupport.isEmpty()) {
+                        for(int i = 0; i < possibleDPIs.length(); i++) {
+                            PrinterResolution compareRes;
+                            asymmDPI = possibleDPIs.optJSONObject(i);
+                            if (asymmDPI != null) {
+                                compareRes = new PrinterResolution(asymmDPI.optInt("cross"), asymmDPI.optInt("feed"), psOptions.units.resSyntax);
+                            } else {
+                                compareRes = new PrinterResolution(possibleDPIs.optInt(i), possibleDPIs.optInt(i), psOptions.units.resSyntax);
+                            }
+
+                            if (rSupport.contains(compareRes)) {
+                                usableRes = compareRes;
+                                break;
+                            }
                         }
                     }
-                }
 
-                if (usableDpi == -1) {
-                    log.warn("Supported printer densities not found, using first value provided");
-                    usableDpi = possibleDPIs.optInt(0);
+                    if (usableRes == null) {
+                        log.warn("Supported printer densities not found, using first value provided");
+                        asymmDPI = possibleDPIs.optJSONObject(0);
+                        if (asymmDPI != null) {
+                            psOptions.density = asymmDPI.optInt("feed");
+                            psOptions.crossDensity = asymmDPI.optInt("cross");
+                        } else {
+                            psOptions.density = possibleDPIs.optInt(0);
+                        }
+                    } else {
+                        psOptions.density = usableRes.getFeedResolution(psOptions.units.resSyntax);
+                        psOptions.crossDensity = usableRes.getCrossFeedResolution(psOptions.units.resSyntax);
+                    }
+                } else {
+                    String relDPI = configOpts.optString("density", "").toLowerCase();
+                    if ("best".equals(relDPI)) {
+                        PrinterResolution bestRes = null;
+                        for(PrinterResolution pr : rSupport) {
+                            if (bestRes == null || !pr.lessThanOrEquals(bestRes)) {
+                                bestRes = pr;
+                            }
+                        }
+                        if (bestRes != null) {
+                            psOptions.density = bestRes.getFeedResolution(psOptions.units.resSyntax);
+                            psOptions.crossDensity = bestRes.getCrossFeedResolution(psOptions.units.resSyntax);
+                        } else {
+                            log.warn("No print densities were found; density: \"{}\" is being ignored", relDPI);
+                        }
+                    } else if ("draft".equals(relDPI)) {
+                        PrinterResolution lowestRes = null;
+                        for(PrinterResolution pr : rSupport) {
+                            if (lowestRes == null || pr.lessThanOrEquals(lowestRes)) {
+                                lowestRes = pr;
+                            }
+                        }
+                        if (lowestRes != null) {
+                            psOptions.density = lowestRes.getFeedResolution(psOptions.units.resSyntax);
+                            psOptions.crossDensity = lowestRes.getCrossFeedResolution(psOptions.units.resSyntax);
+                        } else {
+                            log.warn("No print densities were found; density: \"{}\" is being ignored", relDPI);
+                        }
+                    } else {
+                        try { psOptions.density = configOpts.getDouble("density"); }
+                        catch(JSONException e) { LoggerUtilities.optionWarn(log, "double", "density", configOpts.opt("density")); }
+                    }
                 }
-
-                psOptions.density = usableDpi;
-            } else {
-                try { psOptions.density = configOpts.getDouble("density"); }
-                catch(JSONException e) { LoggerUtilities.optionWarn(log, "double", "density", configOpts.opt("density")); }
             }
         }
         if (!configOpts.isNull("dithering")) {
@@ -122,8 +212,24 @@ public class PrintOptions {
             catch(JSONException e) { LoggerUtilities.optionWarn(log, "boolean", "dithering", configOpts.opt("dithering")); }
         }
         if (!configOpts.isNull("duplex")) {
-            try { psOptions.duplex = configOpts.getBoolean("duplex"); }
-            catch(JSONException e) { LoggerUtilities.optionWarn(log, "boolean", "duplex", configOpts.opt("duplex")); }
+            try {
+                if (configOpts.getBoolean("duplex")) {
+                    psOptions.duplex = Sides.DUPLEX;
+                }
+            }
+            catch(JSONException e) {
+                //not a boolean, try as a string
+                try {
+                    String duplex = configOpts.getString("duplex").toLowerCase();
+                    if (duplex.matches("^(duplex|(two.sided.)?long(.edge)?)$")) {
+                        psOptions.duplex = Sides.DUPLEX;
+                    } else if (duplex.matches("^(tumble|(two.sided.)?short(.edge)?)$")) {
+                        psOptions.duplex = Sides.TUMBLE;
+                    }
+                    //else - one sided (default)
+                }
+                catch(JSONException e2) { LoggerUtilities.optionWarn(log, "valid value", "duplex", configOpts.opt("duplex")); }
+            }
         }
         if (!configOpts.isNull("interpolation")) {
             switch(configOpts.optString("interpolation")) {
@@ -184,6 +290,17 @@ public class PrintOptions {
             try { psOptions.paperThickness = configOpts.getDouble("paperThickness"); }
             catch(JSONException e) { LoggerUtilities.optionWarn(log, "double", "paperThickness", configOpts.opt("paperThickness")); }
         }
+        if (!configOpts.isNull("spool")) {
+            JSONObject spool = configOpts.optJSONObject("spool");
+            if (spool != null) {
+                if (!spool.isNull("size")) {
+                    try { psOptions.spoolSize = spool.getInt("size"); }
+                    catch(JSONException e) { LoggerUtilities.optionWarn(log, "integer", "spool.size", spool.opt("size")); }
+                }
+            } else {
+                LoggerUtilities.optionWarn(log, "JSONObject", "spool", configOpts.opt("spool"));
+            }
+        }
         if (!configOpts.isNull("printerTray")) {
             psOptions.printerTray = configOpts.optString("printerTray", null);
         }
@@ -217,21 +334,12 @@ public class PrintOptions {
                 LoggerUtilities.optionWarn(log, "JSONObject", "size", configOpts.opt("size"));
             }
         }
-        if (!configOpts.isNull("units")) {
-            switch(configOpts.optString("units")) {
-                case "mm":
-                    psOptions.units = Unit.MM; break;
-                case "cm":
-                    psOptions.units = Unit.CM; break;
-                case "in":
-                    psOptions.units = Unit.INCH; break;
-                default:
-                    LoggerUtilities.optionWarn(log, "valid value", "units", configOpts.opt("units")); break;
-            }
-        }
 
         //grab any useful service defaults
-        PrinterResolution defaultRes = PrintingUtilities.getNativeDensity(output.getPrintService());
+        PrinterResolution defaultRes = null;
+        if (output.isSetService()) {
+            defaultRes = output.getNativePrinter().getResolution().value();
+        }
         if (defaultRes != null) {
             //convert dphi to unit-dependant density ourselves (to keep as double type)
             defOptions.density = (double)defaultRes.getFeedResolution(1) / psOptions.getUnits().getDPIUnits();
@@ -243,8 +351,9 @@ public class PrintOptions {
                 defOptions.density = 60000d / psOptions.getUnits().getDPIUnits();
             }
         }
-        if ((psOptions.isRasterize() || format == PrintingUtilities.Format.IMAGE) && psOptions.getDensity() == 0) {
+        if ((psOptions.isRasterize() || format == PrintingUtilities.Format.IMAGE) && psOptions.getDensity() <= 1) {
             psOptions.density = defOptions.density;
+            psOptions.crossDensity = defOptions.density;
         }
 
         if (output.isSetService()) {
@@ -278,9 +387,8 @@ public class PrintOptions {
     public class Raw {
         private boolean altPrinting = false;    //Alternate printing for linux systems
         private String encoding = null;         //Text encoding / charset
-        private String endOfDoc = null;         //End of document character
-        private String language = null;         //Printer language
-        private int perSpool = 1;               //Pages per spool
+        private String spoolEnd = null;         //End of document character(s)
+        private int spoolSize = 1;              //Pages per spool
         private int copies = 1;                 //Job copies
         private String jobName = null;          //Job name
 
@@ -293,16 +401,12 @@ public class PrintOptions {
             return encoding;
         }
 
-        public String getEndOfDoc() {
-            return endOfDoc;
+        public String getSpoolEnd() {
+            return spoolEnd;
         }
 
-        public String getLanguage() {
-            return language;
-        }
-
-        public int getPerSpool() {
-            return perSpool;
+        public int getSpoolSize() {
+            return spoolSize;
         }
 
         public int getCopies() {
@@ -316,17 +420,20 @@ public class PrintOptions {
 
     /** Pixel printing options */
     public class Pixel {
+        private Bounds bounds = null;                                               //Bounding box rectangle
         private ColorType colorType = ColorType.COLOR;                              //Color / black&white
         private int copies = 1;                                                     //Job copies
-        private double density = 0;                                                 //Pixel density (DPI or DPMM)
+        private double crossDensity = 0;                                            //Cross feed density
+        private double density = 0;                                                 //Pixel density (DPI or DPMM), feed density if crossDensity is defined
         private Object dithering = RenderingHints.VALUE_DITHER_DEFAULT;             //Image dithering
-        private boolean duplex = false;                                             //Double/single sided
+        private Sides duplex = Sides.ONE_SIDED;                                     //Multi-siding
         private Object interpolation = RenderingHints.VALUE_INTERPOLATION_BICUBIC;  //Image interpolation
         private String jobName = null;                                              //Job name
         private boolean legacy = false;                                             //Legacy printing
         private Margins margins = new Margins();                                    //Page margins
         private Orientation orientation = null;                                     //Page orientation
         private double paperThickness = -1;                                         //Paper thickness
+        private int spoolSize = 0;                                                   //Pages before sending to printer
         private String printerTray = null;                                          //Printer tray to use
         private boolean rasterize = true;                                           //Whether documents are rasterized before printing
         private double rotation = 0;                                                //Image rotation
@@ -335,12 +442,20 @@ public class PrintOptions {
         private Unit units = Unit.INCH;                                             //Units for density, margins, size
 
 
+        public Bounds getBounds() {
+            return bounds;
+        }
+
         public ColorType getColorType() {
             return colorType;
         }
 
         public int getCopies() {
             return copies;
+        }
+
+        public double getCrossDensity() {
+            return crossDensity;
         }
 
         public double getDensity() {
@@ -351,7 +466,7 @@ public class PrintOptions {
             return dithering;
         }
 
-        public boolean isDuplex() {
+        public Sides getDuplex() {
             return duplex;
         }
 
@@ -377,6 +492,10 @@ public class PrintOptions {
 
         public double getPaperThickness() {
             return paperThickness;
+        }
+
+        public int getSpoolSize() {
+            return spoolSize;
         }
 
         public String getPrinterTray() {
@@ -472,6 +591,37 @@ public class PrintOptions {
 
         public double left() {
             return left;
+        }
+    }
+
+    /* Bounding box generic rectangle */
+    public class Bounds {
+        private double x;
+        private double y;
+        private double width;
+        private double height;
+
+        public Bounds(double x, double y, double width, double height) {
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.height = height;
+        }
+
+        public double getX() {
+            return x;
+        }
+
+        public double getY() {
+            return y;
+        }
+
+        public double getWidth() {
+            return width;
+        }
+
+        public double getHeight() {
+            return height;
         }
     }
 

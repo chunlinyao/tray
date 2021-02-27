@@ -4,6 +4,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.auth.Certificate;
 import qz.common.Constants;
+import qz.ui.component.CertificateDisplay;
+import qz.ui.component.CertificateTable;
+import qz.ui.component.ContainerList;
+import qz.ui.component.IconCache;
 import qz.utils.FileUtilities;
 
 import javax.swing.*;
@@ -17,6 +21,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -48,7 +53,7 @@ public class SiteManagerDialog extends BasicDialog implements Runnable {
 
     public SiteManagerDialog(JMenuItem caller, IconCache iconCache) {
         super(caller, iconCache);
-        certTable = new CertificateTable(null, iconCache);
+        certTable = new CertificateTable(iconCache);
         initComponents();
     }
 
@@ -58,7 +63,6 @@ public class SiteManagerDialog extends BasicDialog implements Runnable {
         blockList = new ContainerList<>();
         blockList.setTag(Constants.BLOCK_FILE);
 
-        setIconImage(getImage(IconCache.Icon.SAVED_ICON));
         splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         splitPane.setResizeWeight(0.5);
 
@@ -208,7 +212,7 @@ public class SiteManagerDialog extends BasicDialog implements Runnable {
         if (certificate != null && FileUtilities.deleteFromFile(certList.getTag().toString(), certificate.getCert().data())) {
             certList.remove(certificate);
         } else {
-            log.warn("Error removing {} from the list of {} sites", certificate, getSelectedTabName().toLowerCase());
+            log.warn("Error removing {} from the list of {} sites", certificate, getSelectedTabName().toLowerCase(Locale.ENGLISH));
         }
 
         return this;

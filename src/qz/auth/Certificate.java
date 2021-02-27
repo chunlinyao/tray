@@ -1,32 +1,32 @@
 package qz.auth;
 
-import com.estontorise.simplersa.RSAKeyImpl;
-import com.estontorise.simplersa.RSAToolFactory;
-import com.estontorise.simplersa.interfaces.RSAKey;
-import com.estontorise.simplersa.interfaces.RSATool;
 import org.apache.commons.codec.binary.StringUtils;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.ssl.Base64;
 import org.apache.commons.ssl.X509CertificateChainBuilder;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
-import org.bouncycastle.asn1.x509.*;
+import org.bouncycastle.asn1.x509.X509Name;
 import org.bouncycastle.jce.PrincipalUtil;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.Constants;
 import qz.utils.ByteUtilities;
 import qz.utils.FileUtilities;
+import qz.utils.SystemUtilities;
 import qz.ws.PrintSocketServer;
 
 import javax.security.cert.CertificateParsingException;
 import java.io.*;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.security.*;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -37,64 +37,60 @@ public class Certificate {
 
     private static final Logger log = LoggerFactory.getLogger(Certificate.class);
 
+    public enum Algorithm {
+        SHA1("SHA1withRSA"),
+        SHA256("SHA256withRSA"),
+        SHA512("SHA512withRSA");
+
+        String name;
+
+        Algorithm(String name) {
+            this.name = name;
+        }
+    }
+
     public static Certificate trustedRootCert = null;
     public static final String[] saveFields = new String[] {"fingerprint", "commonName", "organization", "validFrom", "validTo", "valid"};
 
+    // Valid date range allows UI to only show "Expired" text for valid certificates
+    private static final Instant UNKNOWN_MIN = LocalDateTime.MIN.toInstant(ZoneOffset.UTC);
+    private static final Instant UNKNOWN_MAX = LocalDateTime.MAX.toInstant(ZoneOffset.UTC);
+
     private static boolean overrideTrustedRootCert = false;
-    private SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+
+    private static DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static DateTimeFormatter dateParse = DateTimeFormatter.ofPattern("uuuu-MM-dd['T'][ ]HH:mm:ss[.n]['Z']"); //allow parsing of both ISO and custom formatted dates
 
     private X509Certificate theCertificate;
     private String fingerprint;
     private String commonName;
     private String organization;
-    private Date validFrom;
-    private Date validTo;
+    private Instant validFrom;
+    private Instant validTo;
 
-    private boolean valid = false; //used by review sites UI only
+    //used by review sites UI only
+    private boolean expired = false;
+    private boolean valid = true;
 
 
-    //Pre-set certificates for various situations that could arise with bad security requests
+    //Pre-set certificate for use when missing
     public static final Certificate UNKNOWN;
-    public static final Certificate EXPIRED;
-    public static final Certificate UNSIGNED;
 
     static {
         HashMap<String,String> map = new HashMap<>();
         map.put("fingerprint", "UNKNOWN REQUEST");
         map.put("commonName", "An anonymous request");
         map.put("organization", "Unknown");
-        map.put("validFrom", "0000-00-00 00:00:00");
-        map.put("validTo", "0000-00-00 00:00:00");
+        map.put("validFrom", UNKNOWN_MIN.toString());
+        map.put("validTo", UNKNOWN_MAX.toString());
         map.put("valid", "false");
         UNKNOWN = Certificate.loadCertificate(map);
-
-        map.put("fingerprint", "EXPIRED REQUEST");
-        map.put("commonName", ""); //filled in per request
-        map.put("organization", ""); //filled in per request
-        EXPIRED = Certificate.loadCertificate(map);
-
-        map.put("fingerprint", "UNSIGNED REQUEST");
-        UNSIGNED = Certificate.loadCertificate(map);
     }
 
     static {
         try {
-            String overridePath;
-            Properties trayProperties = PrintSocketServer.getTrayProperties();
-            if (trayProperties != null && trayProperties.containsKey("authcert.override")) {
-                overridePath = trayProperties.getProperty("authcert.override");
-            } else {
-                overridePath = System.getProperty("trustedRootCert");
-            }
-            if (overridePath != null) {
-                try {
-                    trustedRootCert = new Certificate(FileUtilities.readLocalFile(overridePath));
-                    overrideTrustedRootCert = true;
-                }
-                catch(IOException e) {
-                    e.printStackTrace();
-                }
-            }
+            Security.addProvider(new BouncyCastleProvider());
+            checkOverrideCertPath();
 
             if (trustedRootCert == null) {
                 trustedRootCert = new Certificate("-----BEGIN CERTIFICATE-----\n" +
@@ -136,6 +132,52 @@ public class Certificate {
     }
 
 
+    private static void checkOverrideCertPath() {
+        // Priority: Check environmental variable
+        String override = System.getProperty("trustedRootCert");
+        String helpText = "System property \"trustedRootCert\"";
+        if(setOverrideCert(override,  helpText, false)) {
+            return;
+        }
+
+        // Preferred: Look for file called "override.crt" in installation directory
+        override = FileUtilities.getParentDirectory(SystemUtilities.getJarPath()) + File.separator + Constants.OVERRIDE_CERT;
+        helpText = String.format("Override cert \"%s\"", Constants.OVERRIDE_CERT);
+        if(setOverrideCert(override, helpText, true)) {
+            return;
+        }
+
+        // Fallback (deprecated): Parse "authcert.override" from qz-tray.properties
+        // Entry was created by 2.0 build system, removed in newer versions in favor of the hard-coded filename
+        Properties props = PrintSocketServer.getTrayProperties();
+        helpText = "Properties file entry \"authcert.override\"";
+        if(props != null && setOverrideCert(props.getProperty("authcert.override"), helpText, false)) {
+            log.warn("Deprecation warning: \"authcert.override\" is no longer supported.\n" +
+                             "{} will look for the system property \"trustedRootCert\", or look for" +
+                             "a file called {} in the working path.", Constants.ABOUT_TITLE, Constants.OVERRIDE_CERT);
+            return;
+        }
+    }
+
+    private static boolean setOverrideCert(String path, String helpText, boolean quiet) {
+        if(path != null && !path.trim().isEmpty()) {
+            if (new File(path).exists()) {
+                try {
+                    log.error("Using override cert: {}", path);
+                    trustedRootCert = new Certificate(FileUtilities.readLocalFile(path));
+                    overrideTrustedRootCert = true;
+                    return true;
+                }
+                catch(Exception e) {
+                    log.error("Error loading override cert: {}", path, e);
+                }
+            } else if(!quiet) {
+                log.warn("{} \"{}\" was provided, but could not be found, skipping.", helpText, path);
+            }
+        }
+        return false;
+    }
+
     /** Decodes a certificate and intermediate certificate from the given string */
     @SuppressWarnings("deprecation")
     public Certificate(String in) throws CertificateParsingException {
@@ -160,8 +202,8 @@ public class Certificate {
             commonName = String.valueOf(PrincipalUtil.getSubjectX509Principal(theCertificate).getValues(X509Name.CN).get(0));
             fingerprint = makeThumbPrint(theCertificate);
             organization = String.valueOf(PrincipalUtil.getSubjectX509Principal(theCertificate).getValues(X509Name.O).get(0));
-            validFrom = theCertificate.getNotBefore();
-            validTo = theCertificate.getNotAfter();
+            validFrom = theCertificate.getNotBefore().toInstant();
+            validTo = theCertificate.getNotAfter().toInstant();
 
             if (trustedRootCert != null) {
                 HashSet<X509Certificate> chain = new HashSet<>();
@@ -172,8 +214,11 @@ public class Certificate {
 
                     for(X509Certificate x509Certificate : x509Certificates) {
                         if (x509Certificate.equals(trustedRootCert.theCertificate)) {
-                            Date now = new Date();
-                            valid = (getValidFromDate().compareTo(now) <= 0) && (getValidToDate().compareTo(now) > 0);
+                            Instant now = Instant.now();
+                            expired = validFrom.isAfter(now) || validTo.isBefore(now);
+                            if (expired) {
+                                valid = false;
+                            }
                         }
                     }
                 }
@@ -184,7 +229,8 @@ public class Certificate {
 
             try {
                 readRenewalInfo();
-            } catch (Exception e) {
+            }
+            catch(Exception e) {
                 log.error("Error reading certificate renewal info", e);
             }
 
@@ -212,24 +258,27 @@ public class Certificate {
     private void readRenewalInfo() throws Exception {
         // "id-at-description" = "2.5.4.13"
         Vector values = PrincipalUtil.getSubjectX509Principal(theCertificate).getValues(new ASN1ObjectIdentifier("2.5.4.13"));
-        if (values.isEmpty()) {
-            return;
-        }
-        String renewalInfo = String.valueOf(values.get(0));
+        Iterator renewals = values.iterator();
 
-        String renewalPrefix = "renewal-of-";
-        if (!renewalInfo.startsWith(renewalPrefix)) {
-            throw new CertificateParsingException("Malformed renewal info");
-        }
-        String previousFingerprint = renewalInfo.substring(renewalPrefix.length());
-        if (previousFingerprint.length() != 40) {
-            throw new CertificateParsingException("Malformed renewal fingerprint");
-        }
+        while(renewals.hasNext()) {
+            String renewalInfo = String.valueOf(renewals.next());
 
-        // Add this certificate to the whitelist if the previous certificate was whitelisted
-        File allowed = FileUtilities.getFile(Constants.ALLOW_FILE, true);
-        if (existsInAnyFile(previousFingerprint, allowed)) {
-            FileUtilities.printLineToFile(Constants.ALLOW_FILE, data());
+            String renewalPrefix = "renewal-of-";
+            if (!renewalInfo.startsWith(renewalPrefix)) {
+                log.warn("Malformed renewal info: {}", renewalInfo);
+                continue;
+            }
+            String previousFingerprint = renewalInfo.substring(renewalPrefix.length());
+            if (previousFingerprint.length() != 40) {
+                log.warn("Malformed renewal fingerprint: {}", previousFingerprint);
+                continue;
+            }
+
+            // Add this certificate to the whitelist if the previous certificate was whitelisted
+            File allowed = FileUtilities.getFile(Constants.ALLOW_FILE, true);
+            if (existsInAnyFile(previousFingerprint, allowed)) {
+                FileUtilities.printLineToFile(Constants.ALLOW_FILE, data());
+            }
         }
     }
 
@@ -247,12 +296,12 @@ public class Certificate {
         cert.organization = data.get("organization");
 
         try {
-            cert.validFrom = cert.dateFormat.parse(data.get("validFrom"));
-            cert.validTo = cert.dateFormat.parse(data.get("validTo"));
+            cert.validFrom = Instant.from(LocalDateTime.from(dateParse.parse(data.get("validFrom"))).atZone(ZoneOffset.UTC));
+            cert.validTo = Instant.from(LocalDateTime.from(dateParse.parse(data.get("validTo"))).atZone(ZoneOffset.UTC));
         }
-        catch(ParseException e) {
-            cert.validFrom = new Date(0);
-            cert.validTo = new Date(0);
+        catch(DateTimeException e) {
+            cert.validFrom = UNKNOWN_MIN;
+            cert.validTo = UNKNOWN_MAX;
 
             log.error("Unable to parse certificate date", e);
         }
@@ -263,24 +312,6 @@ public class Certificate {
     }
 
     /**
-     * Copies the company information from a valid certificate to show on an invalid signature certificate.
-     *
-     * @param copyFrom The valid certificate that failed a signature check
-     */
-    public void adjustStaticCertificate(Certificate copyFrom) {
-        if (this != UNSIGNED && this != EXPIRED) {
-            throw new UnsupportedOperationException("Cannot adjust a non-static certificate's values");
-        }
-
-        commonName = copyFrom.commonName;
-        organization = copyFrom.organization;
-
-        validFrom = copyFrom.validFrom;
-        validTo = copyFrom.validTo;
-        valid = false; //this is bad request, so never trusted
-    }
-
-    /**
      * Checks given signature for given data against this certificate,
      * ensuring it is properly signed
      *
@@ -288,17 +319,17 @@ public class Certificate {
      * @param data      the data to check
      * @return true if signature valid, false if not
      */
-    public boolean isSignatureValid(String signature, String data) {
+    public boolean isSignatureValid(Algorithm algorithm, String signature, String data) {
         if (!signature.isEmpty()) {
-            RSATool tool = RSAToolFactory.getRSATool();
-            RSAKey thePublicKey = new RSAKeyImpl(theCertificate.getPublicKey());
-
             //On errors, assume failure.
             try {
-                String hash = DigestUtils.sha256Hex(data);
-                return tool.verifyWithKey(StringUtils.getBytesUtf8(hash), Base64.decodeBase64(signature), thePublicKey);
+                Signature verifier = Signature.getInstance(algorithm.name);
+                verifier.initVerify(theCertificate.getPublicKey());
+                verifier.update(StringUtils.getBytesUtf8(DigestUtils.sha256Hex(data)));
+
+                return verifier.verify(Base64.decodeBase64(signature));
             }
-            catch(Exception e) {
+            catch(GeneralSecurityException e) {
                 log.error("Unable to verify signature", e);
             }
         }
@@ -327,11 +358,11 @@ public class Certificate {
             try(BufferedReader br = new BufferedReader(new FileReader(file))) {
                 String line;
                 while((line = br.readLine()) != null) {
-                if (line.contains("\t")) {
-                    String print = line.substring(0, line.indexOf("\t"));
-                    if (print.equals(fingerprint)) {
-                        return true;
-                    }
+                    if (line.contains("\t")) {
+                        String print = line.substring(0, line.indexOf("\t"));
+                        if (print.equals(fingerprint)) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -357,18 +388,26 @@ public class Certificate {
     }
 
     public String getValidFrom() {
-        return dateFormat.format(validFrom);
+        if (validFrom.isAfter(UNKNOWN_MIN)) {
+            return dateFormat.format(validFrom.atZone(ZoneOffset.UTC));
+        } else {
+            return "Not Provided";
+        }
     }
 
     public String getValidTo() {
-        return dateFormat.format(validTo);
+        if (validTo.isBefore(UNKNOWN_MAX)) {
+            return dateFormat.format(validTo.atZone(ZoneOffset.UTC));
+        } else {
+            return "Not Provided";
+        }
     }
 
-    public Date getValidFromDate() {
+    public Instant getValidFromDate() {
         return validFrom;
     }
 
-    public Date getValidToDate() {
+    public Instant getValidToDate() {
         return validTo;
     }
 
@@ -376,7 +415,15 @@ public class Certificate {
      * Validates certificate against embedded cert.
      */
     public boolean isTrusted() {
+        return isValid() && !isExpired();
+    }
+
+    public boolean isValid() {
         return valid;
+    }
+
+    public boolean isExpired() {
+        return expired;
     }
 
 

@@ -6,13 +6,15 @@
 </head>
 
 <!-- Required scripts -->
-<script type="text/javascript" src="js/dependencies/rsvp-3.1.0.min.js"></script>
-<script type="text/javascript" src="js/dependencies/sha-256.min.js"></script>
 <script type="text/javascript" src="js/qz-tray.js"></script>
 
+<!-- Pollyfills -->
+<script type="text/javascript" src="js/sample/promise-polyfill-8.1.3.min.js"></script>
+<script type="text/javascript" src="js/sample/whatwg-fetch-3.0.0.min.js"></script>
+
 <!-- Page styling -->
-<script type="text/javascript" src="js/additional/jquery-1.11.3.min.js"></script>
-<script type="text/javascript" src="js/additional/bootstrap.min.js"></script>
+<script type="text/javascript" src="js/sample/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="js/sample/bootstrap.min.js"></script>
 <link rel="stylesheet" href="css/font-awesome.min.css" />
 <link rel="stylesheet" href="css/bootstrap.min.css" />
 <link rel="stylesheet" href="css/style.css" />
@@ -59,9 +61,17 @@
                     <div class="btn-toolbar">
                         <div class="btn-group" role="group">
                             <button type="button" class="btn btn-success" onclick="startConnection();">Connect</button>
+                            <button id="toggleConnectionGroup" type="button" class="btn btn-success"
+                                    onclick="checkGroupActive('toggleConnectionGroup', 'connectionGroup'); $('#connectionHost').select();"
+                                    data-toggle="tooltip" data-placement="bottom" title="Connect to QZ Tray running on a print server"><span class="fa fa-caret-down"></span>&nbsp;</button>
                             <button type="button" class="btn btn-warning" onclick="endConnection();">Disconnect</button>
                         </div>
-                        <button type="button" class="btn btn-info" onclick="listNetworkDevices();">List Network Info</button>
+                        <button type="button" class="btn btn-info" onclick="listNetworkDevices();">Network Info</button>
+                    </div>
+                    <div class="form-group" id="connectionGroup">
+                        <hr>
+                        <label for="printerSearch">Connect to host:</label>
+                        <input type="text" id="connectionHost" value="localhost" class="form-control" />
                     </div>
                 </div>
             </div>
@@ -139,14 +149,29 @@
                 <div class="row">
                     <div class="col-md-6">
                         <div class="form-group">
+                            <label>Language</label>
                             <div>
-                                <label>Print Data</label>
-                            </div>
-                            <div class="btn-group">
-                                <button type="button" class="btn btn-default" onclick="printCommand();">Commands</button>
-                                <button type="button" class="btn btn-default" onclick="printBase64();">Base64</button>
-                                <button type="button" class="btn btn-default" onclick="printXML();">XML</button>
-                                <button type="button" class="btn btn-default" onclick="printHex();">Hex</button>
+                                <label>
+                                    <input type="radio" name="pLanguage" id="pLangEPL" value="EPL" />
+                                    EPL2
+                                </label>
+                                <label>
+                                    <input type="radio" name="pLanguage" id="pLangZPL" value="ZPL" />
+                                    ZPLII
+                                </label>
+                                <br />
+                                <label>
+                                    <input type="radio" name="pLanguage" id="pLangESCPOS" value="ESCPOS" />
+                                    ESC/POS
+                                </label>
+                                <label>
+                                    <input type="radio" name="pLanguage" id="pLangEPCL" value="EPCL" />
+                                    EPCL
+                                </label>
+                                <label>
+                                    <input type="radio" name="pLanguage" id="pLangEVOLIS" value="EVOLIS" />
+                                    Evolis
+                                </label>
                             </div>
                         </div>
                         <div class="form-group">
@@ -162,6 +187,17 @@
                     </div>
 
                     <div class="col-md-6">
+                        <div class="form-group">
+                            <div>
+                                <label>Print Data</label>
+                            </div>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-default" onclick="printCommand();">Commands</button>
+                                <button type="button" class="btn btn-default" onclick="printBase64();">Base64</button>
+                                <button type="button" class="btn btn-default" onclick="printXML();">XML</button>
+                                <button type="button" class="btn btn-default" onclick="printHex();">Hex</button>
+                            </div>
+                        </div>
                         <div class="form-group">
                             <div>
                                 <label>Raster Print</label>
@@ -191,8 +227,8 @@
                                             </div>
 
                                             <div class="form-group form-inline">
-                                                <label for="rawEndOfDoc">End Of Doc</label>
-                                                <input type="text" id="rawEndOfDoc" class="form-control pull-right" />
+                                                <label for="rawSpoolEnd">End Of Doc</label>
+                                                <input type="text" id="rawSpoolEnd" class="form-control pull-right" />
                                             </div>
 
                                             <div class="form-group form-inline">
@@ -230,32 +266,6 @@
 
                                     <div class="row">
                                         <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>Language</label>
-                                                <div>
-                                                    <label>
-                                                        <input type="radio" name="pLanguage" id="pLangEPL" value="EPL" />
-                                                        EPL2
-                                                    </label>
-                                                    <label>
-                                                        <input type="radio" name="pLanguage" id="pLangZPL" value="ZPL" />
-                                                        ZPLII
-                                                    </label>
-                                                    <br />
-                                                    <label>
-                                                        <input type="radio" name="pLanguage" id="pLangESCP" value="ESCP" />
-                                                        ESC/POS
-                                                    </label>
-                                                    <label>
-                                                        <input type="radio" name="pLanguage" id="pLangEPCL" value="EPCL" />
-                                                        EPCL
-                                                    </label>
-                                                    <label>
-                                                        <input type="radio" name="pLanguage" id="pLangEVOLIS" value="EVOLIS" />
-                                                        Evolis
-                                                    </label>
-                                                </div>
-                                            </div>
                                             <div class="form-group form-inline">
                                                 <label for="pX">Image X</label>
                                                 <input type="number" id="pX" class="form-control pull-right" />
@@ -351,15 +361,14 @@
                                             </div>
 
                                             <div class="form-group form-inline">
-                                                <label for="pxlDensity" class="tip" data-toggle="tooltip"
-                                                       title="DPI, DPCM, or DPMM depending on units specified">Density
-                                                </label>
-                                                <input type="number" id="pxlDensity" class="form-control pull-right" />
-                                            </div>
-
-                                            <div class="form-group form-inline">
                                                 <label for="pxlDuplex"> Duplex</label>
-                                                <input type="checkbox" id="pxlDuplex" class="pull-right" />
+                                                <select id="pxlDuplex" class="form-control pull-right">
+                                                    <option value="">Single Sided</option>
+                                                    <option value="duplex">Double Sided</option>
+                                                    <option value="long-edge">Two Sided (Long Edge)</option>
+                                                    <option value="short-edge">Two Sided (Short Edge)</option>
+                                                    <option value="tumble">Tumble</option>
+                                                </select>
                                             </div>
 
                                             <div class="form-group form-inline">
@@ -413,8 +422,33 @@
                                                 <label for="pxlRotation">Rotation</label>
                                                 <input type="number" step="any" id="pxlRotation" class="form-control pull-right" />
                                             </div>
+
+                                            <div class="form-group form-inline">
+                                                <label for="pxlSpoolSize">Per Spool</label>
+                                                <input type="number" id="pxlSpoolSize" class="form-control pull-right" />
+                                            </div>
                                         </div>
                                         <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="pxlDensity" class="tip" data-toggle="tooltip"
+                                                       title="DPI, DPCM, or DPMM depending on units specified">Density</label>
+                                                (
+                                                <label for="pxlDensityAsymm" class="inline">Asymmetric:</label>
+                                                <input type="checkbox" id="pxlDensityAsymm" onclick="checkGroupActive('pxlDensityAsymm', 'pxlDensityGroup', 'pxlDensity');">
+                                                )
+                                                <input id="pxlDensity" class="form-control" />
+                                            </div>
+                                            <div class="inline" id="pxlDensityGroup">
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlCrossDensity">&nbsp; Cross:</label>
+                                                    <input type="number" id="pxlCrossDensity" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlFeedDensity">&nbsp; Feed:</label>
+                                                    <input type="number" id="pxlFeedDensity" class="form-control pull-right" />
+                                                </div>
+                                            </div>
+
                                             <div class="form-group">
                                                 <label>Units</label>
                                                 <div>
@@ -484,6 +518,40 @@
                                                         &nbsp; Height:
                                                     </label>
                                                     <input type="number" step="any" id="pxlSizeHeight" class="form-control pull-right" />
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label class="inline">Bounds</label>
+                                                (
+                                                <label for="pxlBoundsActive" class="inline">Enable:</label>
+                                                <input type="checkbox" id="pxlBoundsActive" onclick="checkGroupActive('pxlBoundsActive', 'pxlBoundsGroup');" />
+                                                )
+                                            </div>
+                                            <div class="inline" id="pxlBoundsGroup">
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlBoundX" class="tip" data-toggle="tooltip" title="In relation to units specified">
+                                                        &nbsp; X:
+                                                    </label>
+                                                    <input type="number" step="any" id="pxlBoundX" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlBoundY" class="tip" data-toggle="tooltip" title="In relation to units specified">
+                                                        &nbsp; Y:
+                                                    </label>
+                                                    <input type="number" step="any" id="pxlBoundY" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlBoundWidth" class="tip" data-toggle="tooltip" title="In relation to units specified">
+                                                        &nbsp; Width:
+                                                    </label>
+                                                    <input type="number" step="any" id="pxlBoundWidth" class="form-control pull-right" />
+                                                </div>
+                                                <div class="form-group form-inline">
+                                                    <label for="pxlBoundHeight" class="tip" data-toggle="tooltip" title="In relation to units specified">
+                                                        &nbsp; Height:
+                                                    </label>
+                                                    <input type="number" step="any" id="pxlBoundHeight" class="form-control pull-right" />
                                                 </div>
                                             </div>
                                         </div>
@@ -646,6 +714,10 @@
                                             </div>
                                         </div>
                                         <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="serialNewline" class="inline">Wait for new line</label>
+                                                <input type="checkbox" id="serialNewline" onclick="checkItemsDisabled('serialNewline', [ 'serialStart', 'serialEnd', 'serialWidth', 'serialHeader' ]);" />
+                                            </div>
                                             <div class="form-group">
                                                 <label class="inline">Length Bytes</label>
                                                 (
@@ -945,7 +1017,7 @@
                             <div class="btn-toolbar">
                                 <div class="btn-group">
                                     <button type="button" class="btn btn-info" onclick="startPrintersListen()">All Printers</button>
-                                    <button type="button" class="btn btn-success" onclick="startPrintersListen($('#configPrinter').html())">
+                                    <button type="button" class="btn btn-success" onclick="startPrintersListen($('#configPrinter').text())">
                                         Current Printer
                                     </button>
                                     <button type="button" class="btn btn-default" onclick="getPrintersStatus()">Request current status</button>
@@ -1029,6 +1101,18 @@
                                         <div class="form-group">
                                             <label for="fileData">Data To Write</label>
                                             <textarea id="fileData" rows="5" style="resize:vertical" class="form-control"></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="includePattern" class="tip" data-toggle="tooltip" title="File pattern to match when listening for file events (e.g. *.txt)">
+                                                Include File Pattern
+                                            </label>
+                                            <input type="text" id="includePattern" class="form-control pull-right" />
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="excludePattern" class="tip" data-toggle="tooltip" title="File pattern to ignore when listening for file events (e.g. *.tmp) ">
+                                                Exclude File Pattern
+                                            </label>
+                                            <input type="text" id="excludePattern" class="form-control pull-right" />
                                         </div>
                                     </div>
                                     <div class="col-md-6">
@@ -1117,6 +1201,9 @@
                     <div class="form-group">
                         <label for="askFile">File:</label>
                         <input type="text" id="askFile" class="form-control" value="C:\tmp\example-file.txt" />
+                        <hr />
+                        <p><span class="text-danger" style="font-weight:bold;"><span class="fa fa-warning"></span> WARNING:</span> This feature has been deprecated.  Please configure a local raw <code>FILE:</code> printer, or use <code>File IO</code></a> instead.  For more
+                            information please see <a href="https://github.com/qzind/tray/issues/730">issue&nbsp;<code>#730</code>.</a></p>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1156,10 +1243,11 @@
     /// Authentication setup ///
     qz.security.setCertificatePromise(function(resolve, reject) {
         //Preferred method - from server
-//        $.ajax({ url: "assets/signing/digital-certificate.txt", cache: false, dataType: "text" }).then(resolve, reject);
+//        fetch("assets/signing/digital-certificate.txt", {cache: 'no-store', headers: {'Content-Type': 'text/plain'}})
+//          .then(function(data) { data.ok ? resolve(data.text()) : reject(data.text()); });
 
         //Alternate method 1 - anonymous
-//        resolve();
+//        resolve();  // remove this line in live environment
 
         //Alternate method 2 - direct
         resolve("-----BEGIN CERTIFICATE-----\n" +
@@ -1224,13 +1312,15 @@
                 "-----END CERTIFICATE-----\n");
     });
 
+    qz.security.setSignatureAlgorithm("SHA512"); // Since 2.1
     qz.security.setSignaturePromise(function(toSign) {
         return function(resolve, reject) {
             //Preferred method - from server
-//            $.ajax("/secure/url/for/sign-message?request=" + toSign).then(resolve, reject);
+//            fetch("/secure/url/for/sign-message?request=" + toSign, {cache: 'no-store', headers: {'Content-Type': 'text/plain'}})
+//              .then(function(data) { data.ok ? resolve(data.text()) : reject(data.text()); });
 
             //Alternate method - unsigned
-            resolve();
+            resolve(); // remove this line in live environment
         };
     });
 
@@ -1245,6 +1335,15 @@
     }
 
     function startConnection(config) {
+        host = $('#connectionHost').val().trim();
+        // Connect to a print-server instance, if specified
+        if(host != "" && host != 'localhost') {
+            if(config) {
+                config.host = host;
+            } else {
+                config = { host: host };
+            }
+        }
         if (!qz.websocket.isActive()) {
             updateState('Waiting', 'default');
 
@@ -1281,7 +1380,7 @@
                 if (key === 'mac') { value = obj[key].match(/.{1,2}/g).join(':'); }
                 if (typeof obj[key] === 'object') { value = value.join(', '); }
 
-                html += '<li><strong>' + labels[key] + ':</strong> ' + value + '</li>';
+                html += '<li><strong>' + labels[key] + ':</strong> <code>' + value + '</code></li>';
             });
 
             return html;
@@ -1290,17 +1389,25 @@
         qz.networking.devices().then(function(data) {
             var list = '';
             var hostname = '';
+            var username = '';
             for(var i = 0; i < data.length; i++) {
                 var info = data[i];
 
-                if (i == 0) hostname = info.hostname;
+                if (i == 0) {
+                   list += "<li>" +
+                        "   <strong>Hostname:</strong> <code>" + info.hostname + "</code>" +
+                        "</li>" +
+                        "<li>" +
+                        "   <strong>Username:</strong> <code>" + info.username + "</code>"
+                        "</li>";
+                }
                 list += "<li>" +
-                        "   <strong>" + (info.name || "UNKNOWN") + (info.id ? " (" + info.id + ")" : "") + "</strong>" +
+                        "   <strong>Interface:</strong> <code>" + (info.name || "UNKNOWN") + (info.id ? "</code> (<code>" + info.id + "</code>)" : "</code>") +
                         "   <ul>" + listItems(info) + "</ul>" +
                         "</li>";
             }
 
-            pinMessage("<strong>Network details:</strong> (" + hostname + ")<br/><ul>" + list + "</ul>");
+            pinMessage("<strong>Network details:</strong><ul>" + list + "</ul>");
         }).catch(displayError);
     }
 
@@ -1338,6 +1445,7 @@
                 list += "<li>" + (data[i].default ? "* " : "") + data[i].name + "<ul>" +
                         "<li><strong>Driver:</strong> " + data[i].driver + "</li>" +
                         "<li><strong>Density:</strong> " + data[i].density + "dpi</li>" +
+                        "<li><strong>Connection:</strong> " + data[i].connection + "</li>" +
                         (data[i].trays ? "<li><strong>Trays:</strong> " + data[i].trays + "</li>" : "") +
                         "</ul></li>";
             }
@@ -1375,10 +1483,10 @@
                     '^XZ\n'
                 ];
                 break;
-            case 'ESCP':
+            case 'ESCPOS':
                 printData = [
                     //defaults to 'type: raw', 'format: command', and 'flavor: plain'
-                    { data: '\nPRINTED WITH QZ' + qzVersion + '.\n\n\n\n\n\n' }
+                    { data: '\nPRINTED WITH QZ ' + qzVersion + '.\n\n\n\n\n\n' }
                 ];
                 break;
             case 'EPCL':
@@ -1581,7 +1689,7 @@
                     { flavor: 'hex', data: 'e44530d0a5e46530d0a5e585a' }
                 ];
                 break;
-            case 'ESCP':
+            case 'ESCPOS':
                 printData = [
                     { flavor: 'hex', data: '0d0a5052494e544544205749544820515a20545241590d0a0d0a' },
                     { flavor: 'hex', data: '5553494e472068657820434f4d4d414e44530d0a0d0a0d0a0d0a' }
@@ -1616,7 +1724,7 @@
                     '^XZ\n'
                 ];
                 break;
-            case 'ESCP':
+            case 'ESCPOS':
                 printData = [
                     //defaults to 'flavor: file'
                     { type: 'raw', format: 'image', data: 'assets/img/image_sample_bw.png', options: opts },
@@ -1652,7 +1760,7 @@
                     '^XZ\n'
                 ];
                 break;
-            case 'ESCP':
+            case 'ESCPOS':
                 printData = [
                     { type: 'raw', format: 'pdf', flavor: 'file', data: 'assets/pdf_sample.pdf', options: opts }
                 ];
@@ -1687,7 +1795,7 @@
                     '^XZ\n'
                 ];
                 break;
-            case 'ESCP':
+            case 'ESCPOS':
                 printData = [
                     { type: 'raw', format: 'html', flavor: 'file', data: 'https://qz.io/about/', options: opts }
                 ];
@@ -1714,7 +1822,7 @@
 
     /// Pixel Printers ///
     function printHTML() {
-        var config = getUpdatedConfig({ 'pxlScale': false });
+        var config = getUpdatedConfig();
         var opts = getUpdatedOptions(true);
 
         var printData = [
@@ -2147,6 +2255,9 @@
         var params = {
             sandbox: $("#fileSandbox").prop("checked"),
             shared: $("#fileShared").prop("checked"),
+            include: $("#includePattern").val() == "" ? [] : $("#includePattern").val(),
+            exclude: $("#excludePattern").val() == "" ? [] : $("#excludePattern").val(),
+            ignoreCase: true,
             listener: {}
         };
 
@@ -2187,9 +2298,9 @@
     /// Resets ///
     function resetRawOptions() {
         //config
-        $("#rawPerSpool").val(1);
+        $("#rawSpoolSize").val(1);
         $("#rawEncoding").val(null);
-        $("#rawEndOfDoc").val(null);
+        $("#rawSpoolEnd").val(null);
         $("#rawAltPrinting").prop('checked', false);
         $("#rawCopies").val(1);
 
@@ -2207,8 +2318,7 @@
         //config
         $("#pxlColorType").val("color");
         $("#pxlCopies").val(1);
-        $("#pxlDensity").val('');
-        $("#pxlDuplex").prop('checked', false);
+        $("#pxlDuplex").val("");
         $("#pxlInterpolation").val("");
         $("#pxlJobName").val("");
         $("#pxlLegacy").prop('checked', false);
@@ -2217,8 +2327,15 @@
         $("#pxlPrinterTray").val(null);
         $("#pxlRasterize").prop('checked', false);
         $("#pxlRotation").val(0);
+        $("#pxlSpoolSize").val("");
         $("#pxlScale").prop('checked', true);
         $("#pxlUnitsIN").prop('checked', true);
+
+        $("#pxlDensity").val('').css('display', '');
+        $("#pxlCrossDensity").val('');
+        $("#pxlFeedDensity").val('');
+        $("#pxlDensityAsymm").prop('checked', false);
+        $("#pxlDensityGroup").css('display', 'none');
 
         $("#pxlMargins").val(0).css('display', '');
         $("#pxlMarginsTop").val(0);
@@ -2233,9 +2350,19 @@
         $("#pxlSizeActive").prop('checked', false);
         $("#pxlSizeGroup").css('display', 'none');
 
+        $("#pxlBoundX").val(0);
+        $("#pxlBoundY").val(0);
+        $("#pxlBoundWidth").val('');
+        $("#pxlBoundHeight").val('');
+        $("#pxlBoundsActive").prop('checked', false);
+        $("#pxlBoundsGroup").css('display', 'none');
+
         //printer
         $("#pPxlWidth").val('');
         $("#pPxlHeight").val('');
+
+        //connection
+        $("#connectionGroup").css('display', 'none');
 
         $("#pxlContent").find(".dirty").removeClass("dirty");
     }
@@ -2350,6 +2477,13 @@
             }
         });
 
+        if (location.hash) {
+            $(".nav-tabs a[href='"+ location.hash +"']").tab('show');
+        }
+        $(".nav-tabs a").on("click", function(e) {
+            location.hash = this.hash;
+        });
+
         $("#usbRawRadio").click(function() { window.readingWeight = false; });
         $("#usbWeightRadio").click(function() { window.readingWeight = true; });
         $("#hidRawRadio").click(function() { window.readingWeight = false; });
@@ -2460,7 +2594,7 @@
     });
 
     //make dirty when changed
-    $("input[type=checkbox]").on('click', function() {
+    $("input").add("select").on('change', function() {
         $(this).addClass("dirty");
     });
 
@@ -2501,12 +2635,33 @@
 
     //checkId = toggle checkbox, groupId = group/element to show, toggleId = group/element to hide
     function checkGroupActive(checkId, groupId, toggleId) {
-        if (isChecked($("#"+ checkId))) {
+        var checkBox = $("#"+ checkId);
+        var useVisibility = false;
+        var invisible = false;
+        if(typeof checkBox.prop("checked") === 'undefined') {
+            // if we're not dealing with a checkbox, rely blindly on visibility instead
+            useVisibility = true;
+            invisible = ($("#"+ groupId).css('display') == 'none');
+            if(invisible) {
+                checkBox.addClass("active");
+            } else {
+                checkBox.removeClass('active');
+            }
+        }
+        if (isChecked(checkBox) || (useVisibility && invisible)) {
             $("#"+ groupId).css('display', '');
             if (toggleId) { $("#"+ toggleId).css('display', 'none'); }
         } else {
             $("#"+ groupId).css('display', 'none');
             if (toggleId) { $("#"+ toggleId).css('display', ''); }
+        }
+    }
+
+    //checkId = toggle checkbox, itemsArray = elements to disable
+    function checkItemsDisabled(checkId, itemsArray) {
+        var disabled = isChecked($("#"+ checkId));
+        for(var index in itemsArray) {
+            $("#"+ itemsArray[index]).prop( "disabled", disabled);
         }
     }
 
@@ -2551,14 +2706,26 @@
     }
 
     function isChecked(checkElm, ifClean) {
-        if (ifClean !== undefined && !checkElm.hasClass("dirty")) {
-            var lbl = checkElm.siblings("label").text();
-            displayMessage("Forced " + lbl + " " + ifClean + ".", 'alert-warning');
+        if (!checkElm.hasClass("dirty")) {
+            if (ifClean !== undefined) {
+                var lbl = checkElm.siblings("label").text();
+                displayMessage("Forced " + lbl + " " + ifClean + ".", 'alert-warning');
 
-            return ifClean;
+                return ifClean;
+            }
         }
 
         return checkElm.prop("checked");
+    }
+
+    function includedValue(element, value) {
+        if (value != null) {
+            return value;
+        } else if (element.hasClass("dirty")) {
+            return element.val();
+        } else {
+            return undefined;
+        }
     }
 
     function usbButton(ids, data) {
@@ -2671,7 +2838,25 @@
             };
         }
 
-        var pxlMargins = $("#pxlMargins").val();
+        var pxlBounds = null;
+        if (isChecked($("#pxlBoundsActive"), cleanConditions['pxlBoundsActive'])) {
+            pxlBounds = {
+                x: $("#pxlBoundX").val(),
+                y: $("#pxlBoundY").val(),
+                width: $("#pxlBoundWidth").val(),
+                height: $("#pxlBoundHeight").val()
+            };
+        }
+
+        var pxlDensity = includedValue($("#pxlDensity"));
+        if (isChecked($("#pxlDensityAsymm"), cleanConditions['pxlDensityAsymm'])) {
+            pxlDensity = {
+                cross: $("#pxlCrossDensity").val(),
+                feed: $("#pxlFeedDensity").val()
+            };
+        }
+
+        var pxlMargins = includedValue($("#pxlMargins"));
         if (isChecked($("#pxlMarginsActive"), cleanConditions['pxlMarginsActive'])) {
             pxlMargins = {
                 top: $("#pxlMarginsTop").val(),
@@ -2682,36 +2867,39 @@
         }
 
         var copies = 1;
+        var spoolSize = null;
         var jobName = null;
         if ($("#rawTab").hasClass("active")) {
-            copies = $("#rawCopies").val();
-            jobName = $("#rawJobName").val();
+            copies = includedValue($("#rawCopies"));
+            spoolSize = includedValue($("#rawSpoolSize"));
+            jobName = includedValue($("#rawJobName"));
         } else {
-            copies = $("#pxlCopies").val();
-            jobName = $("#pxlJobName").val();
+            copies = includedValue($("#pxlCopies"));
+            spoolSize = includedValue($("#pxlSpoolSize"));
+            jobName = includedValue($("#pxlJobName"));
         }
 
         cfg.reconfigure({
-                            altPrinting: isChecked($("#rawAltPrinting"), cleanConditions['rawAltPrinting']),
-                            encoding: $("#rawEncoding").val(),
-                            endOfDoc: $("#rawEndOfDoc").val(),
-                            perSpool: $("#rawPerSpool").val(),
+                            altPrinting: includedValue($("#rawAltPrinting"), isChecked($("#rawAltPrinting"), cleanConditions['rawAltPrinting'])),
+                            encoding: includedValue($("#rawEncoding")),
+                            spool: { size: spoolSize, end: includedValue($("#rawSpoolEnd")) },
 
-                            colorType: $("#pxlColorType").val(),
+                            bounds: pxlBounds,
+                            colorType: includedValue($("#pxlColorType")),
                             copies: copies,
-                            density: $("#pxlDensity").val(),
-                            duplex: isChecked($("#pxlDuplex"), cleanConditions['pxlDuplex']),
-                            interpolation: $("#pxlInterpolation").val(),
+                            density: pxlDensity,
+                            duplex: includedValue($("#pxlDuplex")),
+                            interpolation: includedValue($("#pxlInterpolation")),
                             jobName: jobName,
                             margins: pxlMargins,
-                            orientation: $("#pxlOrientation").val(),
-                            paperThickness: $("#pxlPaperThickness").val(),
-                            printerTray: $("#pxlPrinterTray").val(),
-                            rasterize: isChecked($("#pxlRasterize"), cleanConditions['pxlRasterize']),
-                            rotation: $("#pxlRotation").val(),
-                            scaleContent: isChecked($("#pxlScale"), cleanConditions['pxlScale']),
+                            orientation: includedValue($("#pxlOrientation")),
+                            paperThickness: includedValue($("#pxlPaperThickness")),
+                            printerTray: includedValue($("#pxlPrinterTray")),
+                            rasterize: includedValue($("#pxlRasterize"), isChecked($("#pxlRasterize"), cleanConditions['pxlRasterize'])),
+                            rotation: includedValue($("#pxlRotation")),
+                            scaleContent: includedValue($("#pxlScale"), isChecked($("#pxlScale"), cleanConditions['pxlScale'])),
                             size: pxlSize,
-                            units: $("input[name='pxlUnits']:checked").val()
+                            units: includedValue($("input[name='pxlUnits']:checked"))
                         });
     }
 
@@ -2746,6 +2934,7 @@
                 start: $("#serialStart").val(),
                 end: $("#serialEnd").val() || null,
                 width: $("#serialWidth").val() || null,
+                untilNewline: $("#serialNewline").prop('checked'),
                 lengthBytes: null,
                 crcBytes: null,
                 includeHeader: $("#serialHeader").prop('checked'),

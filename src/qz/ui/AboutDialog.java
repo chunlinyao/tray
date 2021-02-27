@@ -1,147 +1,179 @@
 package qz.ui;
 
-import org.eclipse.jetty.server.*;
+import com.github.zafarkhaja.semver.Version;
+import org.eclipse.jetty.server.Server;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import qz.common.AboutInfo;
 import qz.common.Constants;
-import qz.common.SecurityInfo;
-import qz.utils.SystemUtilities;
+import qz.ui.component.EmLabel;
+import qz.ui.component.IconCache;
+import qz.ui.component.LinkLabel;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.border.EtchedBorder;
 import java.awt.*;
-import java.net.MalformedURLException;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.font.TextAttribute;
 import java.net.URL;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.SortedMap;
 
 /**
  * Created by Tres on 2/26/2015.
  * Displays a basic about dialog
  */
-public class AboutDialog extends BasicDialog {
-    JPanel gridPanel;
-    JLabel wssLabel;
-    JLabel wsLabel;
-    SortedMap<String, String> libVersions;
-    String name;
+public class AboutDialog extends BasicDialog implements Themeable {
 
-    public AboutDialog(JMenuItem menuItem, IconCache iconCache, String name) {
+    private static final Logger log = LoggerFactory.getLogger(AboutDialog.class);
+
+    private Server server;
+
+    private boolean limitedDisplay;
+
+    private JLabel lblUpdate;
+    private JButton updateButton;
+
+    // Use <html> allows word wrapping on a standard JLabel
+    class TextWrapLabel extends JLabel {
+        TextWrapLabel(String text) {
+            super("<html>" + text + "</html>");
+        }
+    }
+
+    public AboutDialog(JMenuItem menuItem, IconCache iconCache) {
         super(menuItem, iconCache);
-        this.name = name;
+
+        //noinspection ConstantConditions - white label support
+        limitedDisplay = Constants.VERSION_CHECK_URL.isEmpty();
+    }
+
+    public void setServer(Server server) {
+        this.server = server;
+
         initComponents();
     }
 
-    @Override
-    public void setVisible(boolean b) {
-        if (libVersions == null) {
-            libVersions = SecurityInfo.getLibVersions();
-            GridLayout layout = (GridLayout)gridPanel.getLayout();
-            layout.setRows(layout.getRows() + libVersions.size());
-
-            gridPanel.add(createLabel("Library Name:", true));
-            gridPanel.add(createLabel("Version:", true));
-            for (Map.Entry<String, String> entry: libVersions.entrySet()) {
-                gridPanel.add(createLabel("    " + entry.getKey(), false));
-                gridPanel.add(createLabel("    "  + (entry.getValue() == null ? "(unknown)" : entry.getValue()), false));
-            }
-            shadeComponents();
-        }
-        super.setVisible(b);
-    }
-
     public void initComponents() {
-        JComponent header = setHeader(new JLabel(getIcon(IconCache.Icon.BANNER_ICON)));
-        header.setBorder(new EmptyBorder(Constants.BORDER_PADDING, 0, Constants.BORDER_PADDING, 0));
+        JLabel lblAbout = new EmLabel(Constants.ABOUT_TITLE, 3);
 
-        gridPanel = new JPanel();
+        JPanel infoPanel = new JPanel();
+        infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.Y_AXIS));
 
-        JScrollPane pane = new JScrollPane(gridPanel);
-        pane.getVerticalScrollBar().setUnitIncrement(8);
-        pane.setPreferredSize(new Dimension(0, (int)(100 * SystemUtilities.getWindowScaleFactor())));
-        gridPanel.setLayout(new GridLayout(5, 2));
-        gridPanel.setBorder(new EtchedBorder(EtchedBorder.LOWERED));
-
-        wsLabel = new JLabel("None");
-        wssLabel = new JLabel("None.  No https support.");
-        wssLabel.setForeground(Constants.WARNING_COLOR);
-        wssLabel.setFont(wsLabel.getFont().deriveFont(Font.BOLD));
-
-        gridPanel.add(createLabel("Software:", true));
-        gridPanel.add(createLabel(name));
-
-        gridPanel.add(createLabel("Secure Socket:", true));
-        gridPanel.add(wssLabel);
-
-        gridPanel.add(createLabel("Fallback Socket:", true));
-        gridPanel.add(wsLabel);
-
-        gridPanel.add(createLabel("Publisher:", true));
-        try {
-            gridPanel.add(new LinkLabel(new URL(Constants.ABOUT_URL)));
+        LinkLabel linkLibrary = new LinkLabel("Detailed library information");
+        if(server.isRunning() && !server.isStopping()) {
+            linkLibrary.setLinkLocation(String.format("%s://%s:%s", server.getURI().getScheme(), AboutInfo.getPreferredHostname(), server.getURI().getPort()));
         }
-        catch(MalformedURLException ex) {
-            gridPanel.add(new LinkLabel(Constants.ABOUT_URL));
-        }
+        Box versionBox = Box.createHorizontalBox();
+        versionBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        versionBox.add(new JLabel(String.format("%s (Java)", Constants.VERSION.toString())));
 
-        shadeComponents();
-        setContent(pane, true);
-    }
 
-    public void shadeComponents() {
-        for(int i = 0; i < gridPanel.getComponents().length; i++) {
-            if (i % 4 == 0 || i % 4 == 1) {
-                if (gridPanel.getComponent(i) instanceof JComponent) {
-                    ((JComponent)gridPanel.getComponent(i)).setOpaque(true);
-                    if(SystemUtilities.isDarkMode()) {
-                        gridPanel.getComponent(i).setBackground(gridPanel.getComponent(i).getBackground().darker());
-                    }
-                    else {
-                        gridPanel.getComponent(i).setBackground(gridPanel.getComponent(i).getBackground().brighter());
-                    }
-                }
-            }
-            ((JComponent)gridPanel.getComponent(i)).setBorder(new EmptyBorder(0, Constants.BORDER_PADDING, 0, Constants.BORDER_PADDING));
-        }
-    }
+        JPanel aboutPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        JLabel logo = new JLabel(getIcon(IconCache.Icon.LOGO_ICON));
+        logo.setBorder(new EmptyBorder(0, 0, 0, limitedDisplay ? 0 : 20));
+        aboutPanel.add(logo);
 
-    public JComponent createLabel(String text) {
-        return createLabel(text, false);
-    }
+        if (!limitedDisplay) {
+            LinkLabel linkNew = new LinkLabel("What's New?");
+            linkNew.setLinkLocation(Constants.VERSION_DOWNLOAD_URL);
 
-    public JComponent createLabel(String text, boolean isBold) {
-        JLabel label = new JLabel(text);
-        if (isBold) {
-            label.setFont(label.getFont().deriveFont(Font.BOLD));
+            lblUpdate = new JLabel();
+            updateButton = new JButton();
+            updateButton.setVisible(false);
+            updateButton.addActionListener(evt -> {
+                try { Desktop.getDesktop().browse(new URL(Constants.ABOUT_DOWNLOAD_URL).toURI()); }
+                catch(Exception e) { log.error("", e); }
+            });
+            checkForUpdate();
+            versionBox.add(Box.createHorizontalStrut(12));
+            versionBox.add(linkNew);
+
+            infoPanel.add(lblAbout);
+            infoPanel.add(Box.createVerticalGlue());
+            infoPanel.add(versionBox);
+            infoPanel.add(Box.createVerticalGlue());
+            infoPanel.add(lblUpdate);
+            infoPanel.add(updateButton);
+            infoPanel.add(Box.createVerticalGlue());
+            infoPanel.add(new TextWrapLabel(String.format("%s is written and supported by %s.", Constants.ABOUT_TITLE, Constants.ABOUT_COMPANY)));
+            infoPanel.add(Box.createVerticalGlue());
+            infoPanel.add(new TextWrapLabel(String.format("If using %s commercially, please first reach out to the website publisher for support issues.", Constants.ABOUT_TITLE)));
+            infoPanel.add(Box.createVerticalGlue());
+            infoPanel.add(linkLibrary);
+            infoPanel.setPreferredSize(logo.getPreferredSize());
+        } else {
+            LinkLabel linkLabel = new LinkLabel(Constants.ABOUT_URL);
+            linkLabel.setLinkLocation(Constants.ABOUT_URL);
+
+            infoPanel.add(Box.createVerticalGlue());
+            infoPanel.add(lblAbout);
+            infoPanel.add(versionBox);
+            infoPanel.add(Box.createVerticalStrut(16));
+            infoPanel.add(linkLabel);
+            infoPanel.add(Box.createVerticalStrut(8));
+            infoPanel.add(linkLibrary);
+            infoPanel.add(Box.createVerticalGlue());
+            infoPanel.add(Box.createHorizontalStrut(16));
         }
 
-        return label;
-    }
+        aboutPanel.add(infoPanel);
 
-    /**
-     * Sets server for displaying port and socket secure/insecure information
-     */
-    public void setServer(Server server) {
-        for(Connector c : server.getConnectors()) {
-            for(ConnectionFactory f : c.getConnectionFactories()) {
-                ServerConnector s = (ServerConnector)c;
-                if (f instanceof SslConnectionFactory) {
-                    wssLabel.setText("wss://localhost:" + s.getLocalPort());
-                    wssLabel.setFont(wsLabel.getFont());
-                    wssLabel.setForeground(wsLabel.getForeground());
-                    break;
-                } else {
-                    wsLabel.setText("ws://localhost:" + s.getLocalPort());
-                    break;
-                }
-            }
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.PAGE_AXIS));
+        panel.add(aboutPanel);
+        panel.add(new JSeparator());
+
+        if (!limitedDisplay) {
+            LinkLabel lblLicensing = new LinkLabel("Licensing Information", 0.9f, false);
+            lblLicensing.setLinkLocation(Constants.ABOUT_LICENSING_URL);
+
+            LinkLabel lblSupport = new LinkLabel("Support Information", 0.9f, false);
+            lblSupport.setLinkLocation(Constants.ABOUT_SUPPORT_URL);
+
+            LinkLabel lblPrivacy = new LinkLabel("Privacy Policy", 0.9f, false);
+            lblPrivacy.setLinkLocation(Constants.ABOUT_PRIVACY_URL);
+
+            JPanel supportPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 80, 10));
+            supportPanel.add(lblLicensing);
+            supportPanel.add(lblSupport);
+            supportPanel.add(lblPrivacy);
+
+            panel.add(supportPanel);
         }
 
-        pack();
+        setContent(panel, true);
     }
 
-    public JButton addPanelButton(JMenuItem menuItem) {
-        JButton button = addPanelButton(menuItem.getText(), menuItem.getIcon(), menuItem.getMnemonic());
-        button.addActionListener(menuItem.getActionListeners()[0]);
-        return button;
+    private void checkForUpdate() {
+        Version latestVersion = AboutInfo.findLatestVersion();
+        if (latestVersion.greaterThan(Constants.VERSION)) {
+            lblUpdate.setText("An update is available:");
+
+            updateButton.setText("Download " + latestVersion.toString());
+            updateButton.setVisible(true);
+        } else if (latestVersion.lessThan(Constants.VERSION)) {
+            lblUpdate.setText("You are on a beta release.");
+
+            updateButton.setText("Revert to stable " + latestVersion.toString());
+            updateButton.setVisible(true);
+        } else {
+            lblUpdate.setText("You have the latest version.");
+
+            updateButton.setVisible(false);
+        }
     }
+
+
+    @Override
+    public void setVisible(boolean visible) {
+        if (visible && !limitedDisplay) {
+            checkForUpdate();
+        }
+
+        super.setVisible(visible);
+    }
+
+
 }

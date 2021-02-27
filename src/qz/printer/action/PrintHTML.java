@@ -10,7 +10,6 @@
 
 package qz.printer.action;
 
-import com.github.zafarkhaja.semver.Version;
 import com.sun.javafx.print.PrintHelper;
 import com.sun.javafx.print.Units;
 import javafx.print.*;
@@ -21,20 +20,18 @@ import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.common.Constants;
-import qz.deploy.DeployUtilities;
 import qz.printer.PrintOptions;
 import qz.printer.PrintOutput;
 import qz.utils.PrintingUtilities;
-import qz.utils.SystemUtilities;
 
 import javax.print.attribute.PrintRequestAttributeSet;
 import javax.print.attribute.standard.Copies;
 import javax.print.attribute.standard.CopiesSupported;
+import javax.print.attribute.standard.Sides;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.print.PageFormat;
 import java.awt.print.PrinterException;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Constructor;
@@ -56,12 +53,6 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
 
     public PrintHTML() {
         super();
-
-        //JavaFX native libs
-        if (SystemUtilities.isJar() && Constants.JAVA_VERSION.greaterThanOrEqualTo(Version.valueOf("11.0.0"))) {
-            System.setProperty("java.library.path", new File(DeployUtilities.detectJarPath()).getParent() + "/libs/");
-        }
-
         models = new ArrayList<>();
     }
 
@@ -85,14 +76,14 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
                 PrintingUtilities.Flavor flavor = PrintingUtilities.Flavor.valueOf(data.optString("flavor", "FILE").toUpperCase(Locale.ENGLISH));
 
                 double pageZoom = (pxlOpts.getDensity() * pxlOpts.getUnits().as1Inch()) / 72.0;
-                if (pageZoom <= 1 || data.optBoolean("forceOriginal")) { pageZoom = 1; }
+                if (pageZoom <= 1) { pageZoom = 1; }
 
                 double pageWidth = 0;
                 double pageHeight = 0;
                 double convertFactor = (72.0 / pxlOpts.getUnits().as1Inch());
 
                 boolean renderFromHeight = Arrays.asList(PrintOptions.Orientation.LANDSCAPE,
-                                                        PrintOptions.Orientation.REVERSE_LANDSCAPE).contains(pxlOpts.getOrientation());
+                                                         PrintOptions.Orientation.REVERSE_LANDSCAPE).contains(pxlOpts.getOrientation());
 
                 if (pxlOpts.getSize() != null) {
                     if (!renderFromHeight) {
@@ -121,10 +112,10 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
                     JSONObject dataOpt = data.getJSONObject("options");
 
                     if (!dataOpt.isNull("pageWidth") && dataOpt.optDouble("pageWidth") > 0) {
-                        pageWidth = dataOpt.optDouble("pageWidth") * (72.0 / pxlOpts.getUnits().as1Inch());
+                        pageWidth = dataOpt.optDouble("pageWidth") * convertFactor;
                     }
                     if (!dataOpt.isNull("pageHeight") && dataOpt.optDouble("pageHeight") > 0) {
-                        pageHeight = dataOpt.optDouble("pageHeight") * (72.0 / pxlOpts.getUnits().as1Inch());
+                        pageHeight = dataOpt.optDouble("pageHeight") * convertFactor;
                     }
                 }
 
@@ -150,7 +141,19 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
             for(WebAppModel model : models) {
                 try { images.add(WebApp.raster(model)); }
                 catch(Throwable t) {
-                    throw new PrinterException("Failed to take raster of web page, image size is too large");
+                    if (model.getZoom() > 1 && t instanceof IllegalArgumentException) {
+                        //probably a unrecognized image loader error, try at default zoom
+                        try {
+                            log.warn("Capture failed with increased zoom, attempting with default value");
+                            model.setZoom(1);
+                            images.add(WebApp.raster(model));
+                        }
+                        catch(Throwable tt) {
+                            throw new PrinterException(tt.getMessage());
+                        }
+                    } else {
+                        throw new PrinterException(t.getMessage());
+                    }
                 }
             }
 
@@ -179,8 +182,11 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
             if (pxlOpts.getColorType() != null) {
                 settings.setPrintColor(getColor(pxlOpts));
             }
-            if (pxlOpts.isDuplex()) {
+            if (pxlOpts.getDuplex() == Sides.DUPLEX || pxlOpts.getDuplex() == Sides.TWO_SIDED_LONG_EDGE) {
                 settings.setPrintSides(PrintSides.DUPLEX);
+            }
+            if (pxlOpts.getDuplex() == Sides.TUMBLE || pxlOpts.getDuplex() == Sides.TWO_SIDED_SHORT_EDGE) {
+                settings.setPrintSides(PrintSides.TUMBLE);
             }
             if (pxlOpts.getPrinterTray() != null) {
                 fxPrinter.getPrinterAttributes().getSupportedPaperSources().stream()
@@ -265,6 +271,7 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
                 }
             }
             catch(Throwable t) {
+                job.cancelJob();
                 throw new PrinterException(t.getMessage());
             }
 
@@ -358,7 +365,7 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
     }
 
     public static Units getUnits(PrintOptions.Pixel opts) {
-        switch (opts.getUnits()) {
+        switch(opts.getUnits()) {
             case INCH:
                 return Units.INCH;
             case MM:
@@ -369,7 +376,7 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
     }
 
     public static PageOrientation getOrientation(PrintOptions.Pixel opts) {
-        switch (opts.getOrientation()) {
+        switch(opts.getOrientation()) {
             case LANDSCAPE:
                 return PageOrientation.LANDSCAPE;
             case REVERSE_LANDSCAPE:
@@ -382,7 +389,7 @@ public class PrintHTML extends PrintImage implements PrintProcessor {
     }
 
     public static PrintColor getColor(PrintOptions.Pixel opts) {
-        switch (opts.getColorType()) {
+        switch(opts.getColorType()) {
             case COLOR:
                 return PrintColor.COLOR;
             default:

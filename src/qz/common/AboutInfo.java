@@ -1,5 +1,6 @@
 package qz.common;
 
+import com.github.zafarkhaja.semver.Version;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.apache.commons.ssl.Base64;
 import org.bouncycastle.asn1.ASN1Primitive;
@@ -11,36 +12,36 @@ import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qz.installer.certificate.KeyPairWrapper;
+import qz.installer.certificate.CertificateManager;
 import qz.utils.SystemUtilities;
 import qz.ws.PrintSocketServer;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.security.KeyStore;
-import java.security.KeyStoreException;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class AboutInfo {
 
     private static final Logger log = LoggerFactory.getLogger(AboutInfo.class);
 
+    private static String preferredHostname = "localhost";
 
-    public static JSONObject gatherAbout(String domain) {
+    public static JSONObject gatherAbout(String domain, CertificateManager certificateManager) {
         JSONObject about = new JSONObject();
-
-        KeyStore keyStore = SecurityInfo.getKeyStore(PrintSocketServer.getTrayProperties());
 
         try {
             about.put("product", product());
-            about.put("socket", socket(keyStore, domain));
+            about.put("socket", socket(certificateManager, domain));
             about.put("environment", environment());
-            about.put("ssl", ssl(keyStore));
+            about.put("ssl", ssl(certificateManager));
             about.put("libraries", libraries());
         }
         catch(JSONException | GeneralSecurityException e) {
@@ -62,13 +63,13 @@ public class AboutInfo {
         return product;
     }
 
-    private static JSONObject socket(KeyStore keystore, String domain) throws JSONException {
+    private static JSONObject socket(CertificateManager certificateManager, String domain) throws JSONException {
         JSONObject socket = new JSONObject();
 
         socket
                 .put("domain", domain)
                 .put("secureProtocol", "wss")
-                .put("securePort", keystore == null? "none":PrintSocketServer.getSecurePortInUse())
+                .put("securePort", certificateManager.isSslActive() ? PrintSocketServer.getSecurePortInUse() : "none")
                 .put("insecureProtocol", "ws")
                 .put("insecurePort", PrintSocketServer.getInsecurePortInUse());
 
@@ -82,37 +83,34 @@ public class AboutInfo {
 
         environment
                 .put("os", SystemUtilities.getOS())
-                .put("java", Constants.JAVA_VERSION)
+                .put("java", String.format("%s (%s)", Constants.JAVA_VERSION, System.getProperty("os.arch")))
                 .put("uptime", DurationFormatUtils.formatDurationWords(uptime, true, false))
                 .put("uptimeMillis", uptime);
 
         return environment;
     }
 
-    private static JSONObject ssl(KeyStore keystore) throws JSONException, KeyStoreException, CertificateEncodingException {
+    private static JSONObject ssl(CertificateManager certificateManager) throws JSONException, CertificateEncodingException {
         JSONObject ssl = new JSONObject();
 
         JSONArray certs = new JSONArray();
-        if (keystore != null) {
-            Enumeration<String> aliases = keystore.aliases();
-            while(aliases.hasMoreElements()) {
-                String alias = aliases.nextElement();
-                if ("X.509".equals(keystore.getCertificate(alias).getType())) {
-                    JSONObject cert = new JSONObject();
-                    X509Certificate x509 = (X509Certificate)keystore.getCertificate(alias);
-                    cert.put("alias", alias);
-                    try {
-                        ASN1Primitive ext = X509ExtensionUtil.fromExtensionValue(x509.getExtensionValue(Extension.basicConstraints.getId()));
-                        cert.put("rootca", BasicConstraints.getInstance(ext).isCA());
-                    }
-                    catch(IOException | NullPointerException e) {
-                        cert.put("rootca", false);
-                    }
-                    cert.put("subject", x509.getSubjectX500Principal().getName());
-                    cert.put("expires", toISO(x509.getNotAfter()));
-                    cert.put("data", formatCert(x509.getEncoded()));
-                    certs.put(cert);
+
+        for (KeyPairWrapper keyPair : new KeyPairWrapper[]{certificateManager.getCaKeyPair(), certificateManager.getSslKeyPair() }) {
+            X509Certificate x509 = keyPair.getCert();
+            if (x509 != null) {
+                JSONObject cert = new JSONObject();
+                cert.put("alias", keyPair.getAlias());
+                try {
+                    ASN1Primitive ext = X509ExtensionUtil.fromExtensionValue(x509.getExtensionValue(Extension.basicConstraints.getId()));
+                    cert.put("rootca", BasicConstraints.getInstance(ext).isCA());
                 }
+                catch(IOException | NullPointerException e) {
+                    cert.put("rootca", false);
+                }
+                cert.put("subject", x509.getSubjectX500Principal().getName());
+                cert.put("expires", SystemUtilities.toISO(x509.getNotAfter()));
+                cert.put("data", formatCert(x509.getEncoded()));
+                certs.put(cert);
             }
         }
         ssl.put("certificates", certs);
@@ -140,12 +138,37 @@ public class AboutInfo {
         return libraries;
     }
 
+    public static String getPreferredHostname() {
+        return preferredHostname;
+    }
 
-    private static String toISO(Date d) {
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
-        TimeZone tz = TimeZone.getTimeZone("UTC");
-        df.setTimeZone(tz);
-        return df.format(d);
+    public static Version findLatestVersion() {
+        try {
+            URL api = new URL(Constants.VERSION_CHECK_URL);
+            BufferedReader br = new BufferedReader(new InputStreamReader(api.openStream()));
+
+            StringBuilder rawJson = new StringBuilder();
+            String line;
+            while((line = br.readLine()) != null) {
+                rawJson.append(line);
+            }
+
+            JSONArray versions = new JSONArray(rawJson.toString());
+            for(int i = 0; i < versions.length(); i++) {
+                JSONObject versionData = versions.getJSONObject(i);
+                if(versionData.getString("target_commitish").equals("master")) {
+                    Version latestVersion = Version.valueOf(versionData.getString("name"));
+                    log.trace("Found latest version: {}", latestVersion);
+                    return latestVersion;
+                }
+            }
+            log.error("Failed to get latest version info");
+        }
+        catch(Exception e) {
+            log.error("Failed to get latest version info", e);
+        }
+
+        return Constants.VERSION;
     }
 
 }

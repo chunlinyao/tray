@@ -1,7 +1,6 @@
 package qz.ws;
 
 import jssc.SerialPortException;
-import org.apache.commons.codec.binary.StringUtils;
 import org.apache.commons.io.IOUtils;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
@@ -12,6 +11,7 @@ import org.eclipse.jetty.websocket.api.annotations.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.auth.Certificate;
+import qz.auth.RequestState;
 import qz.common.Constants;
 import qz.common.TrayManager;
 import qz.communication.*;
@@ -25,11 +25,13 @@ import javax.print.PrintServiceLookup;
 import javax.security.cert.CertificateParsingException;
 import javax.usb.util.UsbUtil;
 import java.awt.*;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.*;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.concurrent.Semaphore;
 
 
@@ -76,6 +78,8 @@ public class PrintSocketClient {
         HID_CLAIMED("hid.isClaimed", false, "check USB claim status"),
         HID_SEND_DATA("hid.sendData", true, "use a USB device"),
         HID_READ_DATA("hid.readData", true, "use a USB device"),
+        HID_SEND_FEATURE_REPORT("hid.sendFeatureReport", true, "use a USB device"),
+        HID_GET_FEATURE_REPORT("hid.getFeatureReport", true, "use a USB device"),
         HID_OPEN_STREAM("hid.openStream", true, "use a USB device"),
         HID_CLOSE_STREAM("hid.closeStream", false, "use a USB device"),
         HID_RELEASE_DEVICE("hid.releaseDevice", false, "release a USB device"),
@@ -158,6 +162,7 @@ public class PrintSocketClient {
 
     @OnWebSocketError
     public void onError(Session session, Throwable error) {
+        if (error instanceof EOFException) { return; }
         log.error("Connection error", error);
         trayManager.displayErrorMessage(error.getMessage());
     }
@@ -185,19 +190,23 @@ public class PrintSocketClient {
 
             Integer connectionPort = session.getRemoteAddress().getPort();
             SocketConnection connection = openConnections.get(connectionPort);
-            Certificate certificate = connection.getCertificate();
+            RequestState request = new RequestState(connection.getCertificate(), json);
 
             //if sent a certificate use that instead for this connection
             if (json.has("certificate")) {
                 try {
-                    certificate = new Certificate(json.optString("certificate"));
-
+                    Certificate certificate = new Certificate(json.optString("certificate"));
                     connection.setCertificate(certificate);
+
+                    request.markNewConnection(certificate);
+
                     log.debug("Received new certificate from connection through {}", connectionPort);
                 }
-                catch(CertificateParsingException ignore) {}
+                catch(CertificateParsingException ignore) {
+                    request.markNewConnection(Certificate.UNKNOWN);
+                }
 
-                if (allowedFromDialog(certificate, "connect to " + Constants.ABOUT_TITLE,
+                if (allowedFromDialog(request, "connect to " + Constants.ABOUT_TITLE,
                                       findDialogPosition(session, json.optJSONObject("position")))) {
                     sendResult(session, UID, null);
                 } else {
@@ -209,24 +218,23 @@ public class PrintSocketClient {
             }
 
             //check request signature
-            if (certificate != Certificate.UNKNOWN) {
+            if (request.hasCertificate()) {
                 if (json.optLong("timestamp") + Constants.VALID_SIGNING_PERIOD < System.currentTimeMillis()
                         || json.optLong("timestamp") - Constants.VALID_SIGNING_PERIOD > System.currentTimeMillis()) {
                     //bad timestamps use the expired certificate
                     log.warn("Expired signature on request");
-                    Certificate.EXPIRED.adjustStaticCertificate(certificate);
-                    certificate = Certificate.EXPIRED;
-                } else if (json.isNull("signature") || !validSignature(certificate, json)) {
+                    request.setStatus(RequestState.Validity.EXPIRED);
+                } else if (json.isNull("signature") || !validSignature(request.getCertUsed(), json)) {
                     //bad signatures use the unsigned certificate
                     log.warn("Bad signature on request");
-                    Certificate.UNSIGNED.adjustStaticCertificate(certificate);
-                    certificate = Certificate.UNSIGNED;
+                    request.setStatus(RequestState.Validity.UNSIGNED);
                 } else {
-                    log.trace("Valid signature from {}", certificate.getCommonName());
+                    log.trace("Valid signature from {}", request.getCertName());
+                    request.setStatus(RequestState.Validity.TRUSTED);
                 }
             }
 
-            processMessage(session, json, connection, certificate);
+            processMessage(session, json, connection, request);
         }
         catch(JSONException e) {
             log.error("Bad JSON: {}", e.getMessage());
@@ -245,8 +253,9 @@ public class PrintSocketClient {
     private boolean validSignature(Certificate certificate, JSONObject message) throws JSONException {
         JSONObject copy = new JSONObject(message, new String[] {"call", "params", "timestamp"});
         String signature = message.optString("signature");
+        String algorithm = message.optString("signAlgorithm", "SHA1").toUpperCase(Locale.ENGLISH);
 
-        return certificate.isSignatureValid(signature, copy.toString().replaceAll("\\\\/", "/"));
+        return certificate.isSignatureValid(Certificate.Algorithm.valueOf(algorithm), signature, copy.toString().replaceAll("\\\\/", "/"));
     }
 
     /**
@@ -255,7 +264,7 @@ public class PrintSocketClient {
      * @param session WebSocket session
      * @param json    JSON received from web API
      */
-    private void processMessage(Session session, JSONObject json, SocketConnection connection, Certificate shownCertificate) throws JSONException, SerialPortException, DeviceException, IOException, ListenerNotFoundException {
+    private void processMessage(Session session, JSONObject json, SocketConnection connection, RequestState request) throws JSONException, SerialPortException, DeviceException, IOException, ListenerNotFoundException {
         String UID = json.optString("uid");
         Method call = Method.findFromCall(json.optString("call"));
         JSONObject params = json.optJSONObject("params");
@@ -280,7 +289,7 @@ public class PrintSocketClient {
         }
 
         if (call.isDialogShown()
-                && !allowedFromDialog(shownCertificate, prompt, findDialogPosition(session, json.optJSONObject("position")))) {
+                && !allowedFromDialog(request, prompt, findDialogPosition(session, json.optJSONObject("position")))) {
             sendError(session, UID, "Request blocked");
             return;
         }
@@ -359,15 +368,7 @@ public class PrintSocketClient {
 
                 SerialIO serial = connection.getSerialPort(params.optString("port"));
                 if (serial != null) {
-                    String serialData;
-                    JSONObject data = params.optJSONObject("data");
-                    if (data != null) {
-                        serialData = data.getString("data");
-                    } else {
-                        serialData = params.optString("data");
-                    }
-
-                    serial.sendData(serialData, opts, SerialUtilities.getDataTypeJSON(data));
+                    serial.sendData(params, opts);
                     sendResult(session, UID, null);
                 } else {
                     sendError(session, UID, String.format("Serial port [%s] must be opened first.", params.optString("port")));
@@ -458,10 +459,17 @@ public class PrintSocketClient {
                 break;
             }
             case USB_SEND_DATA:
+            case HID_SEND_FEATURE_REPORT :
             case HID_SEND_DATA: {
                 DeviceIO usb = connection.getDevice(dOpts);
                 if (usb != null) {
-                    usb.sendData(StringUtils.getBytesUtf8(params.optString("data")), dOpts.getEndpoint());
+
+                    if (call == Method.HID_SEND_FEATURE_REPORT) {
+                        usb.sendFeatureReport(DeviceUtilities.getDataBytes(params, null), dOpts.getEndpoint());
+                    } else {
+                        usb.sendData(DeviceUtilities.getDataBytes(params, null), dOpts.getEndpoint());
+                    }
+
                     sendResult(session, UID, null);
                 } else {
                     sendError(session, UID, String.format("USB Device [v:%s p:%s] must be claimed first.", params.opt("vendorId"), params.opt("productId")));
@@ -470,10 +478,19 @@ public class PrintSocketClient {
                 break;
             }
             case USB_READ_DATA:
+            case HID_GET_FEATURE_REPORT :
             case HID_READ_DATA: {
                 DeviceIO usb = connection.getDevice(dOpts);
                 if (usb != null) {
-                    byte[] response = usb.readData(dOpts.getResponseSize(), dOpts.getEndpoint());
+                    byte[] response;
+                    
+                    if (call == Method.HID_GET_FEATURE_REPORT) {
+                        response = usb.getFeatureReport(dOpts.getResponseSize(), dOpts.getEndpoint());
+                    } else {
+                        response = usb.readData(dOpts.getResponseSize(), dOpts.getEndpoint());
+                    }
+
+
                     JSONArray hex = new JSONArray();
                     for(byte b : response) {
                         hex.put(UsbUtil.toHexString(b));
@@ -520,7 +537,7 @@ public class PrintSocketClient {
 
             case FILE_START_LISTENING: {
                 FileParams fileParams = new FileParams(params);
-                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, true);
+                Path absPath = FileUtilities.getAbsolutePath(params, request, true);
                 FileIO fileIO = new FileIO(session, params, fileParams.getPath(), absPath);
 
                 if (connection.getFileListener(absPath) == null && !fileIO.isWatching()) {
@@ -539,7 +556,7 @@ public class PrintSocketClient {
                     connection.removeAllFileListeners();
                     sendResult(session, UID, null);
                 } else {
-                    Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, true);
+                    Path absPath = FileUtilities.getAbsolutePath(params, request, true);
                     FileIO fileIO = connection.getFileListener(absPath);
 
                     if (fileIO != null) {
@@ -555,7 +572,7 @@ public class PrintSocketClient {
                 break;
             }
             case FILE_LIST: {
-                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, true);
+                Path absPath = FileUtilities.getAbsolutePath(params, request, true);
 
                 if (Files.exists(absPath)) {
                     if (Files.isDirectory(absPath)) {
@@ -574,7 +591,7 @@ public class PrintSocketClient {
                 break;
             }
             case FILE_READ: {
-                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, false);
+                Path absPath = FileUtilities.getAbsolutePath(params, request, false);
                 if (Files.exists(absPath)) {
                     if (Files.isReadable(absPath)) {
                         sendResult(session, UID, new String(Files.readAllBytes(absPath)));
@@ -591,15 +608,15 @@ public class PrintSocketClient {
             }
             case FILE_WRITE: {
                 FileParams fileParams = new FileParams(params);
-                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, false);
+                Path absPath = FileUtilities.getAbsolutePath(params, request, false);
 
-                Files.createDirectories(absPath.getParent());
                 Files.write(absPath, fileParams.getData(), StandardOpenOption.CREATE, fileParams.getAppendMode());
+                FileUtilities.inheritParentPermissions(absPath);
                 sendResult(session, UID, null);
                 break;
             }
             case FILE_REMOVE: {
-                Path absPath = FileUtilities.getAbsolutePath(params, shownCertificate, false);
+                Path absPath = FileUtilities.getAbsolutePath(params, request, false);
 
                 if (Files.exists(absPath)) {
                     Files.delete(absPath);
@@ -635,12 +652,12 @@ public class PrintSocketClient {
         }
     }
 
-    private boolean allowedFromDialog(Certificate cert, String prompt, Point position) {
+    private boolean allowedFromDialog(RequestState request, String prompt, Point position) {
         //If cert can be resolved before the lock, do so and return
-        if (cert == null || cert.isBlocked()) {
+        if (request.hasBlockedCert()) {
             return false;
         }
-        if (cert.isTrusted() && cert.isSaved()) {
+        if (request.hasSavedCert()) {
             return true;
         }
 
@@ -654,7 +671,7 @@ public class PrintSocketClient {
         }
 
         //prompt user for access
-        boolean allowed = trayManager.showGatewayDialog(cert, prompt, position);
+        boolean allowed = trayManager.showGatewayDialog(request, prompt, position);
 
         dialogAvailable.release();
 
@@ -663,7 +680,8 @@ public class PrintSocketClient {
 
     private Point findDialogPosition(Session session, JSONObject positionData) {
         Point pos = new Point(0, 0);
-        if (session.getRemoteAddress().getAddress().isLoopbackAddress() && positionData != null) {
+        if (session.getRemoteAddress().getAddress().isLoopbackAddress() && positionData != null
+                && !positionData.isNull("x") && !positionData.isNull("y")) {
             pos.move(positionData.optInt("x"), positionData.optInt("y"));
         }
 

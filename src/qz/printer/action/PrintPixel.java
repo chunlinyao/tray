@@ -5,7 +5,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.printer.PrintOptions;
 import qz.printer.PrintOutput;
-import qz.utils.PrintingUtilities;
 import qz.utils.SystemUtilities;
 
 import javax.print.attribute.HashPrintRequestAttributeSet;
@@ -24,14 +23,14 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public abstract class PrintPixel {
 
     private static final Logger log = LoggerFactory.getLogger(PrintPixel.class);
 
     private static final List<Integer> MAC_BAD_IMAGE_TYPES = Arrays.asList(BufferedImage.TYPE_BYTE_BINARY, BufferedImage.TYPE_CUSTOM);
-
-    private static final List<String> PRINTER_TRAY_ALIASES = Arrays.asList("", "Tray ", "Paper Cassette ");
 
 
     protected PrintRequestAttributeSet applyDefaultSettings(PrintOptions.Pixel pxlOpts, PageFormat page, Media[] supported) {
@@ -41,20 +40,39 @@ public abstract class PrintPixel {
         if (pxlOpts.getColorType() != null) {
             attributes.add(pxlOpts.getColorType().getAsChromaticity());
         }
-        if (pxlOpts.isDuplex()) {
-            attributes.add(Sides.DUPLEX);
-        }
+        attributes.add(pxlOpts.getDuplex());
         if (pxlOpts.getOrientation() != null) {
             attributes.add(pxlOpts.getOrientation().getAsOrientRequested());
         }
         if (pxlOpts.getPrinterTray() != null && !pxlOpts.getPrinterTray().isEmpty()) {
+            Pattern exactPattern = Pattern.compile("\\b" + Pattern.quote(pxlOpts.getPrinterTray()) + "\\b", Pattern.CASE_INSENSITIVE);
+            Pattern fuzzyPattern = Pattern.compile("\\b.*?[" + Pattern.quote(pxlOpts.getPrinterTray()) +"]+.*?\\b", Pattern.CASE_INSENSITIVE);
+            Media bestFit = null;
+            Integer fuzzyFitDelta = null;
+
             for(Media m : supported) {
-                for(String pta : PRINTER_TRAY_ALIASES) {
-                    if (m.toString().trim().equalsIgnoreCase(pta + pxlOpts.getPrinterTray().trim())) {
-                        attributes.add(m);
+                if (m instanceof MediaTray) {
+                    Matcher exactly = exactPattern.matcher(m.toString().trim());
+                    Matcher fuzzily = fuzzyPattern.matcher(m.toString().trim());
+
+                    if (exactly.find()) {
+                        bestFit = m;
                         break;
                     }
+
+                    while(fuzzily.find()) {
+                        //look for as close to exact match as possible
+                        int delta = Math.abs(fuzzily.group().length() - pxlOpts.getPrinterTray().length());
+                        if (fuzzyFitDelta == null || delta < fuzzyFitDelta) {
+                            fuzzyFitDelta = delta;
+                            bestFit = m;
+                        }
+                    }
                 }
+            }
+
+            if (bestFit != null) {
+                attributes.add(bestFit);
             }
         }
 
@@ -62,12 +80,14 @@ public abstract class PrintPixel {
 
 
         // Java prints using inches at 72dpi
-        final float DENSITY = (float)pxlOpts.getDensity() * pxlOpts.getUnits().as1Inch();
         final float CONVERT = pxlOpts.getUnits().toInches() * 72f;
 
-        log.trace("DPI: {}\tCNV: {}", DENSITY, CONVERT);
-        if (DENSITY > 0) {
-            attributes.add(new PrinterResolution((int)DENSITY, (int)DENSITY, ResolutionSyntax.DPI));
+        log.trace("DPI: [{}x{}]\tCNV: {}", pxlOpts.getDensity(), pxlOpts.getCrossDensity(), CONVERT);
+        if (pxlOpts.getDensity() > 0) {
+            double cross = pxlOpts.getCrossDensity();
+            if (cross == 0) { cross = pxlOpts.getDensity(); }
+
+            attributes.add(new PrinterResolution((int)cross, (int)pxlOpts.getDensity(), pxlOpts.getUnits().getDPIUnits()));
         }
 
         //apply sizing and margins
@@ -115,9 +135,9 @@ public abstract class PrintPixel {
 
         PrinterResolution rUsing = (PrinterResolution)attributes.get(PrinterResolution.class);
         if (rUsing != null) {
-            List<Integer> rSupport = PrintingUtilities.getSupportedDensities(output.getPrintService());
+            List<PrinterResolution> rSupport = output.getNativePrinter().getResolutions();
             if (!rSupport.isEmpty()) {
-                if (!rSupport.contains(rUsing.getFeedResolution(ResolutionSyntax.DPI))) {
+                if (!rSupport.contains(rUsing)) {
                     log.warn("Not using a supported DPI for printing");
                     log.debug("Available DPI: {}", ArrayUtils.toString(rSupport));
                 }
@@ -165,8 +185,8 @@ public abstract class PrintPixel {
         return imgToPrint;
     }
 
-    protected Map<RenderingHints.Key, Object> buildRenderingHints(Object dithering, Object interpolation) {
-        Map<RenderingHints.Key, Object> rhMap = new HashMap<>();
+    protected Map<RenderingHints.Key,Object> buildRenderingHints(Object dithering, Object interpolation) {
+        Map<RenderingHints.Key,Object> rhMap = new HashMap<>();
         rhMap.put(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
         rhMap.put(RenderingHints.KEY_DITHERING, dithering);
         rhMap.put(RenderingHints.KEY_INTERPOLATION, interpolation);

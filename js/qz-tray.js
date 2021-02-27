@@ -1,18 +1,11 @@
 'use strict';
 
 /**
- * @version 2.1.0
+ * @version 2.1.2+11
  * @overview QZ Tray Connector
  * <p/>
  * Connects a web client to the QZ Tray software.
  * Enables printing and device communication from javascript.
- *
- * @requires RSVP
- *     Provides Promises/A+ functionality for API calls.
- *     Can be overridden via <code>qz.api.setPromiseType</code> to remove dependency.
- * @requires Sha256
- *     Provides hashing algorithm for signing messages.
- *     Can be overridden via <code>qz.api.setSha256Type</code> to remove dependency.
  */
 var qz = (function() {
 
@@ -24,11 +17,28 @@ var qz = (function() {
         };
     }
 
+    if (!Number.isInteger) {
+        Number.isInteger = function(value) {
+            return typeof value === 'number' && isFinite(value) && Math.floor(value) === value;
+        };
+    }
+
+
+    // from SHA implementation
+    if (typeof String.prototype.utf8Encode == 'undefined') {
+        String.prototype.utf8Encode = function() { return unescape(encodeURIComponent(this)); };
+    }
+    if (typeof String.prototype.utf8Decode == 'undefined') {
+        String.prototype.utf8Decode = function() {
+            try { return decodeURIComponent(escape(this)); }
+            catch(e) { return this; } // invalid UTF-8? return as-is
+        };
+    }
 
 ///// PRIVATE METHODS /////
 
     var _qz = {
-        VERSION: "2.1.0",                              //must match @version above
+        VERSION: "2.1.2+11",                              //must match @version above
         DEBUG: false,
 
         log: {
@@ -36,8 +46,10 @@ var qz = (function() {
             trace: function() { if (_qz.DEBUG) { console.log.apply(console, arguments); } },
             /** General messages */
             info: function() { console.info.apply(console, arguments); },
+            /** General warnings */
+            warn: function() { console.warn.apply(console, arguments); },
             /** Debugging errors */
-            warn: function() { if (_qz.DEBUG) { console.warn.apply(console, arguments); } },
+            allay: function() { if (_qz.DEBUG) { console.warn.apply(console, arguments); } },
             /** General errors */
             error: function() { console.error.apply(console, arguments); }
         },
@@ -138,7 +150,7 @@ var qz = (function() {
 
                                 if (config.keepAlive > 0) {
                                     var interval = setInterval(function() {
-                                        if (!qz.websocket.isActive()) {
+                                        if (!_qz.tools.isActive()) {
                                             clearInterval(interval);
                                             return;
                                         }
@@ -180,8 +192,8 @@ var qz = (function() {
                         _qz.log.info("Closed connection with QZ Tray");
 
                         //if this is set, then an explicit close call was made
-                        if (_qz.websocket.connection.promise != undefined) {
-                            _qz.websocket.connection.promise.resolve();
+                        if (this.promise != undefined) {
+                            this.promise.resolve();
                         }
 
                         _qz.websocket.callClose(evt);
@@ -214,10 +226,13 @@ var qz = (function() {
                             _qz.websocket.pendingCalls[obj.uid] = obj.promise;
                         }
 
+                        //ensure we know how this was signed
+                        obj.signAlgorithm = _qz.security.signAlgorithm;
+
                         // track requesting monitor
                         obj.position = {
-                            x: screen ? ((screen.availWidth || screen.width) / 2) + (screen.left || screen.availLeft) : 0,
-                            y: screen ? ((screen.availHeight || screen.height) / 2) + (screen.top || screen.availTop) : 0
+                            x: typeof screen !== 'undefined' ? ((screen.availWidth || screen.width) / 2) + (screen.left || screen.availLeft) : 0,
+                            y: typeof screen !== 'undefined' ? ((screen.availHeight || screen.height) / 2) + (screen.top || screen.availTop) : 0
                         };
 
                         try {
@@ -241,6 +256,7 @@ var qz = (function() {
                                 }).then(function(signature) {
                                     _qz.log.trace("Signature for call", signature);
                                     obj.signature = signature;
+
                                     _qz.signContent = undefined;
                                     _qz.websocket.connection.send(_qz.tools.stringify(obj));
                                 });
@@ -297,7 +313,7 @@ var qz = (function() {
                                         _qz.file.callFile(JSON.parse(returned.event));
                                         break;
                                     default:
-                                        _qz.log.warn("Cannot determine stream type for callback", returned);
+                                        _qz.log.allay("Cannot determine stream type for callback", returned);
                                         break;
                                 }
                             }
@@ -309,7 +325,7 @@ var qz = (function() {
 
                         var promise = _qz.websocket.pendingCalls[returned.uid];
                         if (promise == undefined) {
-                            _qz.log.warn('No promise found for returned response');
+                            _qz.log.allay('No promise found for returned response');
                         } else {
                             if (returned.error != undefined) {
                                 promise.reject(new Error(returned.error));
@@ -326,15 +342,35 @@ var qz = (function() {
                     //also gives the user a chance to deny the connection
                     function sendCert(cert) {
                         if (cert === undefined) { cert = null; }
-                        _qz.websocket.connection.sendData({ certificate: cert, promise: openPromise });
+
+                        //websocket setup, query what version is connected
+                        qz.api.getVersion().then(function(version) {
+                            _qz.websocket.connection.version = version;
+                            _qz.websocket.connection.semver = version.toLowerCase().replace(/-rc\./g, "-rc").split(/[\\+\\.-]/g);
+                            for(var i = 0; i < _qz.websocket.connection.semver.length; i++) {
+                                try {
+                                    if (i == 3 && _qz.websocket.connection.semver[i].toLowerCase().indexOf("rc") == 0) {
+                                        // Handle "rc1" pre-release by negating build info
+                                        _qz.websocket.connection.semver[i] = -(_qz.websocket.connection.semver[i].replace(/\D/g, ""));
+                                        continue;
+                                    }
+                                    _qz.websocket.connection.semver[i] = parseInt(_qz.websocket.connection.semver[i]);
+                                }
+                                catch(ignore) {}
+
+                                if (_qz.websocket.connection.semver.length < 4) {
+                                    _qz.websocket.connection.semver[3] = 0;
+                                }
+                            }
+
+                            //algorithm can be declared before a connection, check for incompatibilities now that we have one
+                            _qz.compatible.algorithm(true);
+                        }).then(function() {
+                            _qz.websocket.connection.sendData({ certificate: cert, promise: openPromise });
+                        });
                     }
 
                     _qz.security.callCert().then(sendCert).catch(sendCert);
-
-                    //websocket setup, query what version is connected
-                    qz.api.getVersion().then(function(version) {
-                        _qz.websocket.connection.version = version;
-                    });
                 },
 
                 /** Generate unique ID used to map a response to a call. */
@@ -394,6 +430,7 @@ var qz = (function() {
             defaultConfig: {
                 //value purposes are explained in the qz.configs.setDefaults docs
 
+                bounds: null,
                 colorType: 'color',
                 copies: 1,
                 density: 0,
@@ -414,8 +451,7 @@ var qz = (function() {
 
                 altPrinting: false,
                 encoding: null,
-                endOfDoc: null,
-                perSpool: 1
+                spool: null
             }
         },
 
@@ -502,25 +538,47 @@ var qz = (function() {
 
         security: {
             /** Function used to resolve promise when acquiring site's public certificate. */
-            certPromise: function(resolve, reject) { reject(); },
-            /** Called to create new promise (using {@link _qz.security.certPromise}) for certificate retrieval. */
+            certHandler: function(resolve, reject) { reject(); },
+            /** Called to create new promise (using {@link _qz.security.certHandler}) for certificate retrieval. */
             callCert: function() {
-                return _qz.tools.promise(_qz.security.certPromise);
+                if (typeof _qz.security.certHandler.then === 'function' || _qz.security.certHandler.constructor.name === "AsyncFunction") {
+                    //already a promise
+                    return _qz.security.certHandler();
+                } else {
+                    //turn into a promise
+                    return _qz.tools.promise(_qz.security.certHandler);
+                }
             },
 
             /** Function used to create promise resolver when requiring signed calls. */
-            signaturePromise: function() { return function(resolve) { resolve(); } },
-            /** Called to create new promise (using {@link _qz.security.signaturePromise}) for signed calls. */
+            signatureFactory: function() { return function(resolve) { resolve(); } },
+            /** Called to create new promise (using {@link _qz.security.signatureFactory}) for signed calls. */
             callSign: function(toSign) {
-                return _qz.tools.promise(_qz.security.signaturePromise(toSign));
-            }
+                if (typeof _qz.security.signatureFactory.then === 'function' || _qz.security.signatureFactory.constructor.name === "AsyncFunction") {
+                    //already a promise
+                    return _qz.security.signatureFactory(toSign);
+                } else {
+                    //turn into a promise
+                    return _qz.tools.promise(_qz.security.signatureFactory(toSign));
+                }
+            },
+
+            /** Signing algorithm used on signatures */
+            signAlgorithm: "SHA1"
         },
 
 
         tools: {
             /** Create a new promise */
             promise: function(resolver) {
-                return new RSVP.Promise(resolver);
+                //prefer global object for historical purposes
+                if (typeof RSVP !== 'undefined') {
+                    return new RSVP.Promise(resolver);
+                } else if (typeof Promise !== 'undefined') {
+                    return new Promise(resolver);
+                } else {
+                    _qz.log.error("Promise/A+ support is required.  See qz.api.setPromiseType(...)");
+                }
             },
 
             stringify: function(object) {
@@ -538,7 +596,12 @@ var qz = (function() {
             },
 
             hash: function(data) {
-                return Sha256.hash(data);
+                //prefer global object for historical purposes
+                if (typeof Sha256 !== 'undefined') {
+                    return Sha256.hash(data);
+                } else {
+                    return _qz.SHA.hash(data);
+                }
             },
 
             ws: typeof WebSocket !== 'undefined' ? WebSocket : null,
@@ -548,6 +611,9 @@ var qz = (function() {
                     var a = document.createElement("a");
                     a.href = loc;
                     return a.href;
+                } else if (typeof exports === 'object') {
+                    //node.js
+                    require('path').resolve(loc);
                 }
                 return loc;
             },
@@ -622,10 +688,46 @@ var qz = (function() {
                 return target;
             },
 
+            versionCompare: function(major, minor, patch, build) {
+                if (_qz.tools.assertActive()) {
+                    var semver = _qz.websocket.connection.semver;
+                    if (semver[0] != major) {
+                        return semver[0] - major;
+                    }
+                    if (minor != undefined && semver[1] != minor) {
+                        return semver[1] - minor;
+                    }
+                    if (patch != undefined && semver[2] != patch) {
+                        return semver[2] - patch;
+                    }
+                    if (build != undefined && semver.length > 3 && semver[3] != build) {
+                        return Number.isInteger(semver[3]) && Number.isInteger(build) ? semver[3] - build : semver[3].toString().localeCompare(build.toString());
+                    }
+                    return 0;
+                }
+            },
+
+            isVersion: function(major, minor, patch, build) {
+                return _qz.tools.versionCompare(major, minor, patch, build) == 0;
+            },
+
+            isActive: function() {
+                return _qz.websocket.connection != null && _qz.websocket.connection.established;
+            },
+
+            assertActive: function() {
+                if (_qz.tools.isActive()) {
+                    return true;
+                }
+                // Promise won't reject on throw; yet better than 'undefined'
+                throw new Error("A connection to QZ has not been established yet");
+            }
+        },
+
+        compatible: {
             /** Converts message format to a previous version's */
-            compatible: function(printData) {
-                var semver = _qz.websocket.connection.version.split(/[.-]/g);
-                if (semver[0] === "2" && semver[1] === "0") {
+            data: function(printData) {
+                if (_qz.tools.isVersion(2, 0)) {
                     /*
                     2.0.x conversion
                     -----
@@ -638,14 +740,14 @@ var qz = (function() {
                     _qz.log.trace("Converting print data to v2.0 for " + _qz.websocket.connection.version);
                     for(var i = 0; i < printData.length; i++) {
                         if (printData[i].constructor === Object) {
-                            if (printData[i].type.toUpperCase() === "RAW" && printData[i].format.toUpperCase() === "IMAGE") {
-                                if (printData[i].flavor.toUpperCase() === "BASE64") {
+                            if (printData[i].type && printData[i].type.toUpperCase() === "RAW" && printData[i].format && printData[i].format.toUpperCase() === "IMAGE") {
+                                if (printData[i].flavor && printData[i].flavor.toUpperCase() === "BASE64") {
                                     //special case for raw base64 images
                                     printData[i].data = "data:image/compat;base64," + printData[i].data;
                                 }
                                 printData[i].flavor = "IMAGE"; //forces 'image' format when shifting for conversion
                             }
-                            if (printData[i].type.toUpperCase() === "RAW" || printData[i].format.toUpperCase() === "COMMAND") {
+                            if ((printData[i].type && printData[i].type.toUpperCase() === "RAW") || (printData[i].format && printData[i].format.toUpperCase() === "COMMAND")) {
                                 printData[i].format = "RAW"; //forces 'raw' type when shifting for conversion
                             }
 
@@ -655,8 +757,155 @@ var qz = (function() {
                         }
                     }
                 }
+            },
+
+            /* Converts config defaults to match previous version */
+            config: function(config, dirty) {
+                if (_qz.tools.isVersion(2, 0)) {
+                    if (!dirty.rasterize) {
+                        config.rasterize = true;
+                    }
+                }
+                if(_qz.tools.versionCompare(2, 1, 2, 11) < 0) {
+                    if(config.spool) {
+                        if(config.spool.size) {
+                            config.perSpool = config.spool.size;
+                            delete config.spool.size;
+                        }
+                        if(config.spool.end) {
+                            config.endOfDoc = config.spool.end;
+                            delete config.spool.end;
+                        }
+                        delete config.spool;
+                    }
+                }
+                return config;
+            },
+
+            /** Compat wrapper with previous version **/
+            networking: function(hostname, port, signature, signingTimestamp, mappingCallback) {
+                // Use 2.0
+                if (_qz.tools.isVersion(2, 0)) {
+                    return _qz.tools.promise(function(resolve, reject) {
+                        _qz.websocket.dataPromise('websocket.getNetworkInfo', {
+                            hostname: hostname,
+                            port: port
+                        }, signature, signingTimestamp).then(function(data) {
+                            if (typeof mappingCallback !== 'undefined') {
+                                resolve(mappingCallback(data));
+                            } else {
+                                resolve(data);
+                            }
+                        }, reject);
+                    });
+                }
+                // Wrap 2.1
+                return _qz.tools.promise(function(resolve, reject) {
+                    _qz.websocket.dataPromise('networking.device', {
+                        hostname: hostname,
+                        port: port
+                    }, signature, signingTimestamp).then(function(data) {
+                        resolve({ ipAddress: data.ip, macAddress: data.mac });
+                    }, reject);
+                });
+            },
+
+            /** Check if QZ version supports chosen algorithm */
+            algorithm: function(quiet) {
+                //if not connected yet we will assume compatibility exists for the time being
+                if (_qz.tools.isActive()) {
+                    if (_qz.tools.isVersion(2, 0)) {
+                        if (!quiet) {
+                            _qz.log.warn("Connected to an older version of QZ, alternate signature algorithms are not supported");
+                        }
+                        return false;
+                    }
+                }
+
+                return true;
             }
-        }
+        },
+
+        /**
+         * Adapted from Chris Veness's code under MIT Licence (C) 2002
+         * see http://www.movable-type.co.uk/scripts/sha256.html
+         */
+        SHA: {
+            //@formatter:off - keep this block compact
+            hash: function(msg) {
+                // add trailing '1' bit (+ 0's padding) to string [§5.1.1]
+                msg = msg.utf8Encode() + String.fromCharCode(0x80);
+
+                // constants [§4.2.2]
+                var K = [
+                    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+                    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+                    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+                    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+                    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+                    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+                    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+                ];
+                // initial hash value [§5.3.1]
+                var H = [ 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 ];
+
+                // convert string msg into 512-bit/16-integer blocks arrays of ints [§5.2.1]
+                var l = msg.length / 4 + 2; // length (in 32-bit integers) of msg + ‘1’ + appended length
+                var N = Math.ceil(l / 16);  // number of 16-integer-blocks required to hold 'l' ints
+                var M = new Array(N);
+
+                for(var i = 0; i < N; i++) {
+                    M[i] = new Array(16);
+                    for(var j = 0; j < 16; j++) {  // encode 4 chars per integer, big-endian encoding
+                        M[i][j] = (msg.charCodeAt(i * 64 + j * 4) << 24) | (msg.charCodeAt(i * 64 + j * 4 + 1) << 16) |
+                            (msg.charCodeAt(i * 64 + j * 4 + 2) << 8) | (msg.charCodeAt(i * 64 + j * 4 + 3));
+                    } // note running off the end of msg is ok 'cos bitwise ops on NaN return 0
+                }
+                // add length (in bits) into final pair of 32-bit integers (big-endian) [§5.1.1]
+                // note: most significant word would be (len-1)*8 >>> 32, but since JS converts
+                // bitwise-op args to 32 bits, we need to simulate this by arithmetic operators
+                M[N-1][14] = ((msg.length - 1) * 8) / Math.pow(2, 32);
+                M[N-1][14] = Math.floor(M[N-1][14]);
+                M[N-1][15] = ((msg.length - 1) * 8) & 0xffffffff;
+
+                // HASH COMPUTATION [§6.1.2]
+                var W = new Array(64); var a, b, c, d, e, f, g, h;
+                for(var i = 0; i < N; i++) {
+                    // 1 - prepare message schedule 'W'
+                    for(var t = 0; t < 16; t++) { W[t] = M[i][t]; }
+                    for(var t = 16; t < 64; t++) { W[t] = (_qz.SHA._dev1(W[t-2]) + W[t-7] + _qz.SHA._dev0(W[t-15]) + W[t-16]) & 0xffffffff; }
+                    // 2 - initialise working variables a, b, c, d, e, f, g, h with previous hash value
+                    a = H[0]; b = H[1]; c = H[2]; d = H[3]; e = H[4]; f = H[5]; g = H[6]; h = H[7];
+                    // 3 - main loop (note 'addition modulo 2^32')
+                    for(var t = 0; t < 64; t++) {
+                        var T1 = h + _qz.SHA._sig1(e) + _qz.SHA._ch(e, f, g) + K[t] + W[t];
+                        var T2 = _qz.SHA._sig0(a) + _qz.SHA._maj(a, b, c);
+                        h = g; g = f; f = e; e = (d + T1) & 0xffffffff;
+                        d = c; c = b; b = a; a = (T1 + T2) & 0xffffffff;
+                    }
+                    // 4 - compute the new intermediate hash value (note 'addition modulo 2^32')
+                    H[0] = (H[0]+a) & 0xffffffff; H[1] = (H[1]+b) & 0xffffffff; H[2] = (H[2]+c) & 0xffffffff; H[3] = (H[3]+d) & 0xffffffff;
+                    H[4] = (H[4]+e) & 0xffffffff; H[5] = (H[5]+f) & 0xffffffff; H[6] = (H[6]+g) & 0xffffffff; H[7] = (H[7]+h) & 0xffffffff;
+                }
+
+                return _qz.SHA._hexStr(H[0]) + _qz.SHA._hexStr(H[1]) + _qz.SHA._hexStr(H[2]) + _qz.SHA._hexStr(H[3]) +
+                    _qz.SHA._hexStr(H[4]) + _qz.SHA._hexStr(H[5]) + _qz.SHA._hexStr(H[6]) + _qz.SHA._hexStr(H[7]);
+            },
+
+            // Rotates right (circular right shift) value x by n positions
+            _rotr: function(n, x) { return (x >>> n) | (x << (32 - n)); },
+            // logical functions
+            _sig0: function(x) { return _qz.SHA._rotr(2, x) ^ _qz.SHA._rotr(13, x) ^ _qz.SHA._rotr(22, x); },
+            _sig1: function(x) { return _qz.SHA._rotr(6, x) ^ _qz.SHA._rotr(11, x) ^ _qz.SHA._rotr(25, x); },
+            _dev0: function(x) { return _qz.SHA._rotr(7, x) ^ _qz.SHA._rotr(18, x) ^ (x >>> 3); },
+            _dev1: function(x) { return _qz.SHA._rotr(17, x) ^ _qz.SHA._rotr(19, x) ^ (x >>> 10); },
+            _ch: function(x, y, z) { return (x & y) ^ (~x & z); },
+            _maj: function(x, y, z) { return (x & y) ^ (x & z) ^ (y & z); },
+            // note can't use toString(16) as it is implementation-dependant, and in IE returns signed numbers when used on full words
+            _hexStr: function(n) { var s = "", v; for(var i = 7; i >= 0; i--) { v = (n >>> (i * 4)) & 0xf; s += v.toString(16); } return s; },
+            //@formatter:on
+        },
     };
 
 
@@ -664,17 +913,28 @@ var qz = (function() {
 
     /** Object to handle configured printer options. */
     function Config(printer, opts) {
+
+        this.config = _qz.tools.extend({}, _qz.printing.defaultConfig); //create a copy of the default options
+        this._dirtyOpts = {}; //track which config options have changed from the defaults
+
         /**
          * Set the printer assigned to this config.
          * @param {string|Object} newPrinter Name of printer. Use object type to specify printing to file or host.
          *  @param {string} [newPrinter.name] Name of printer to send printing.
-         *  @param {string} [newPrinter.file] Name of file to send printing.
+         *  @param {string} [newPrinter.file] DEPRECATED: Name of file to send printing.
          *  @param {string} [newPrinter.host] IP address or host name to send printing.
          *  @param {string} [newPrinter.port] Port used by &lt;printer.host>.
          */
         this.setPrinter = function(newPrinter) {
             if (typeof newPrinter === 'string') {
                 newPrinter = { name: newPrinter };
+            }
+
+            if(newPrinter && newPrinter.file) {
+                // TODO: Warn for UNC paths too https://github.com/qzind/tray/issues/730
+                if(newPrinter.file.indexOf("\\\\") != 0) {
+                    _qz.log.warn("Printing to file is deprecated.  See https://github.com/qzind/tray/issues/730");
+                }
             }
 
             this.printer = newPrinter;
@@ -694,6 +954,12 @@ var qz = (function() {
          * @see qz.configs.setDefaults
          */
         this.reconfigure = function(newOpts) {
+            for(var key in newOpts) {
+                if (newOpts[key] !== undefined) {
+                    this._dirtyOpts[key] = true;
+                }
+            }
+
             _qz.tools.extend(this.config, newOpts);
         };
 
@@ -701,12 +967,12 @@ var qz = (function() {
          * @returns {Object} The currently applied options on this config.
          */
         this.getOptions = function() {
-            return this.config;
+            return _qz.compatible.config(this.config, this._dirtyOpts);
         };
 
         // init calls for new config object
         this.setPrinter(printer);
-        this.config = opts;
+        this.reconfigure(opts);
     }
 
     /**
@@ -729,7 +995,7 @@ var qz = (function() {
 ///// PUBLIC METHODS /////
 
     /** @namespace qz */
-    return {
+    var qz = {
 
         /**
          * Calls related specifically to the web socket connection.
@@ -746,7 +1012,7 @@ var qz = (function() {
              * @memberof  qz.websocket
              */
             isActive: function() {
-                return _qz.websocket.connection != null && _qz.websocket.connection.established;
+                return _qz.tools.isActive();
             },
 
             /**
@@ -768,7 +1034,7 @@ var qz = (function() {
              */
             connect: function(options) {
                 return _qz.tools.promise(function(resolve, reject) {
-                    if (qz.websocket.isActive()) {
+                    if (_qz.tools.isActive()) {
                         reject(new Error("An open connection with QZ Tray already exists"));
                         return;
                     } else if (_qz.websocket.connection != null) {
@@ -840,7 +1106,7 @@ var qz = (function() {
              */
             disconnect: function() {
                 return _qz.tools.promise(function(resolve, reject) {
-                    if (qz.websocket.isActive()) {
+                    if (_qz.tools.isActive()) {
                         _qz.websocket.connection.close();
                         _qz.websocket.connection.promise = { resolve: resolve, reject: reject };
                     } else {
@@ -885,16 +1151,7 @@ var qz = (function() {
              *
              * @memberof qz.websocket
              */
-            getNetworkInfo: function(hostname, port, signature, signingTimestamp) {
-                return _qz.tools.promise(function(resolve, reject) {
-                    _qz.websocket.dataPromise('networking.device', {
-                        hostname: hostname,
-                        port: port
-                    }, signature, signingTimestamp).then(function(data) {
-                        resolve({ ipAddress: data.ip, macAddress: data.mac });
-                    }, reject);
-                });
-            },
+            getNetworkInfo: _qz.compatible.networking,
 
             /**
              * @returns {Object<{socket: String, host: String, port: Number}>} Details of active websocket connection
@@ -902,11 +1159,9 @@ var qz = (function() {
              * @memberof qz.websocket
              */
             getConnectionInfo: function() {
-                if (_qz.websocket.connection) {
+                if (_qz.tools.assertActive()) {
                     var url = _qz.websocket.connection.url.split(/[:\/]+/g);
                     return { socket: url[0], host: url[1], port: +url[2] };
-                } else {
-                    throw new Error("A connection to QZ has not been established yet");
                 }
             }
         },
@@ -968,7 +1223,9 @@ var qz = (function() {
              * @memberof qz.printers
              */
             startListening: function(printers) {
-                if (!Array.isArray(printers)) printers = [printers];
+                if (!Array.isArray(printers)) {
+                    printers = [printers];
+                }
                 var params = {
                     printerNames: printers
                 };
@@ -996,6 +1253,8 @@ var qz = (function() {
              * @since 2.1.0
              *
              * @see qz.printers.startListening
+             *
+             * @memberof qz.printers
              */
             getStatus: function() {
                 return _qz.websocket.dataPromise('printers.getStatus');
@@ -1030,11 +1289,19 @@ var qz = (function() {
              *
              * @param {Object} options Default options used by printer configs if not overridden.
              *
+             *  @param {Object} [options.bounds=null] Bounding box rectangle.
+             *   @param {number} [options.bounds.x=0] Distance from left for bounding box starting corner
+             *   @param {number} [options.bounds.y=0] Distance from top for bounding box starting corner
+             *   @param {number} [options.bounds.width=0] Width of bounding box
+             *   @param {number} [options.bounds.height=0] Height of bounding box
              *  @param {string} [options.colorType='color'] Valid values <code>[color | grayscale | blackwhite]</code>
              *  @param {number} [options.copies=1] Number of copies to be printed.
-             *  @param {number|Array<number>} [options.density=72] Pixel density (DPI, DPMM, or DPCM depending on <code>[options.units]</code>).
+             *  @param {number|Array<number>|Object|Array<Object>|string} [options.density=0] Pixel density (DPI, DPMM, or DPCM depending on <code>[options.units]</code>).
              *      If provided as an array, uses the first supported density found (or the first entry if none found).
-             *  @param {boolean} [options.duplex=false] Double sided printing
+             *      If provided as a string, valid values are <code>[best | draft]</code>, corresponding to highest or lowest reported density respectively.
+             *  @param {number} [options.density.cross=0] Asymmetric pixel density for the cross feed direction.
+             *  @param {number} [options.density.feed=0] Asymmetric pixel density for the feed direction.
+             *  @param {boolean|string} [options.duplex=false] Double sided printing, Can specify duplex style by passing a string value: <code>[one-sided | duplex | long-edge | tumble | short-edge]</code>
              *  @param {number} [options.fallbackDensity=null] Value used when default density value cannot be read, or in cases where reported as "Normal" by the driver, (in DPI, DPMM, or DPCM depending on <code>[options.units]</code>).
              *  @param {string} [options.interpolation='bicubic'] Valid values <code>[bicubic | bilinear | nearest-neighbor]</code>. Controls how images are handled when resized.
              *  @param {string} [options.jobName=null] Name to display in print queue.
@@ -1058,8 +1325,11 @@ var qz = (function() {
              *
              *  @param {boolean} [options.altPrinting=false] Print the specified file using CUPS command line arguments.  Has no effect on Windows.
              *  @param {string} [options.encoding=null] Character set
-             *  @param {string} [options.endOfDoc=null]
-             *  @param {number} [options.perSpool=1] Number of pages per spool.
+             *  @param {string} [options.endOfDoc=null] DEPRECATED Raw only: Character(s) denoting end of a page to control spooling.
+             *  @param {number} [options.perSpool=1] DEPRECATED: Raw only: Number of pages per spool.
+             *  @param {Object} [options.spool=null] Advanced spooling options.
+             *   @param {number} [options.spool.size=null] Number of pages per spool.  Default is no limit.  If <code>spool.end</code> is provided, defaults to <code>1</code>
+             *   @param {string} [options.spool.end=null] Raw only: Character(s) denoting end of a page to control spooling.
              *
              * @memberof qz.configs
              */
@@ -1084,8 +1354,7 @@ var qz = (function() {
              * @memberof qz.configs
              */
             create: function(printer, options) {
-                var myOpts = _qz.tools.extend({}, _qz.printing.defaultConfig, options);
-                return new Config(printer, myOpts);
+                return new Config(printer, options);
             }
         },
 
@@ -1166,7 +1435,7 @@ var qz = (function() {
             //clean up data formatting
             for(var d = 0; d < data.length; d++) {
                 _qz.tools.relative(data[d]);
-                _qz.tools.compatible(data[d]);
+                _qz.compatible.data(data[d]);
             }
 
             var sendToPrint = function(mapping) {
@@ -1265,6 +1534,7 @@ var qz = (function() {
              *   @param {string|Array<string>} [options.rx.start] Character(s) denoting start of response bytes. Used in conjunction with `end`, `width`, or `lengthbit` property.
              *   @param {string} [options.rx.end] Character denoting end of response bytes. Used in conjunction with `start` property.
              *   @param {number} [options.rx.width] Fixed width size of response bytes (not including header if `start` is set). Used alone or in conjunction with `start` property.
+             *   @param {boolean} [options.rx.untilNewline] Returns data between newline characters (`\n` or `\r`) Truncates empty responses.  Overrides `start`, `end`, `width`.
              *   @param {number|Object} [options.rx.lengthBytes] If a number is passed it is treated as the length index. Other values are left as their defaults.
              *    @param {number} [options.rx.lengthBytes.index=0] Position of the response byte (not including response `start` bytes) used to denote the length of the remaining response data.
              *    @param {number} [options.rx.lengthBytes.length=1] Length of response length bytes after response header.
@@ -1293,7 +1563,7 @@ var qz = (function() {
              *
              * @param {string} port An open serial port to send data.
              * @param {string|Array<string>|Object} data Data to be sent to the serial device.
-             *  @param {string} [data.type='PLAIN'] Valid values <code>[FILE | PLAIN | HEX?? | BASE64??]</code>
+             *  @param {string} [data.type='PLAIN'] Valid values <code>[FILE | PLAIN | HEX | BASE64]</code>
              *  @param {string|Array<string>} data.data Data to be sent to the serial device.
              * @param {Object} options Serial port configuration updates. See <code>qz.serial.openPort</code> `options` docs for available values.
              *     For best performance, it is recommended to only set these values on the port open call.
@@ -1305,12 +1575,19 @@ var qz = (function() {
              * @memberof qz.serial
              */
             sendData: function(port, data, options) {
-                if (typeof data !== 'object') {
-                    data = {
-                        data: data,
-                        type: "PLAIN"
+                if (_qz.tools.versionCompare(2, 1, 0, 12) >= 0) {
+                    if (typeof data !== 'object') {
+                        data = {
+                            data: data,
+                            type: "PLAIN"
+                        }
+                    }
+
+                    if (data.type && data.type.toUpperCase() == "FILE") {
+                        data.data = _qz.tools.absolute(data.data);
                     }
                 }
+
                 var params = {
                     port: port,
                     data: data,
@@ -1449,6 +1726,7 @@ var qz = (function() {
              *  @param deviceInfo.productId Hex string of USB device's product ID.
              *  @param deviceInfo.endpoint Hex string of endpoint on the claimed interface for the USB device.
              *  @param deviceInfo.data Bytes to send over specified endpoint.
+             *  @param {string} [deviceInfo.type='PLAIN'] Valid values <code>[FILE | PLAIN | HEX | BASE64]</code>
              * @returns {Promise<null|Error>}
              *
              * @memberof qz.usb
@@ -1462,6 +1740,19 @@ var qz = (function() {
                         endpoint: arguments[2],
                         data: arguments[3]
                     };
+                }
+
+                if (_qz.tools.versionCompare(2, 1, 0, 12) >= 0) {
+                    if (typeof deviceInfo.data !== 'object') {
+                        deviceInfo.data = {
+                            data: deviceInfo.data,
+                            type: "PLAIN"
+                        }
+                    }
+
+                    if (deviceInfo.data.type && deviceInfo.data.type.toUpperCase() == "FILE") {
+                        deviceInfo.data.data = _qz.tools.absolute(deviceInfo.data.data);
+                    }
                 }
 
                 return _qz.websocket.dataPromise('usb.sendData', deviceInfo);
@@ -1681,6 +1972,7 @@ var qz = (function() {
              *  @param deviceInfo.endpoint=0x00 First byte of the data packet signifying the HID report ID.
              *                             Must be 0x00 for devices only supporting a single report.
              *  @param deviceInfo.reportId=0x00 Alias for <code>deviceInfo.endpoint</code>. Not used if endpoint is provided.
+             *  @param {string} [deviceInfo.type='PLAIN'] Valid values <code>[FILE | PLAIN | HEX | BASE64]</code>
              * @returns {Promise<null|Error>}
              * @since 2.0.1
              *
@@ -1695,6 +1987,19 @@ var qz = (function() {
                         data: arguments[2],
                         endpoint: arguments[3]
                     };
+                }
+
+                if (_qz.tools.versionCompare(2, 1, 0, 12) >= 0) {
+                    if (typeof deviceInfo.data !== 'object') {
+                        deviceInfo.data = {
+                            data: deviceInfo.data,
+                            type: "PLAIN"
+                        }
+                    }
+
+                    if (deviceInfo.data.type && deviceInfo.data.type.toUpperCase() == "FILE") {
+                        deviceInfo.data.data = _qz.tools.absolute(deviceInfo.data.data);
+                    }
                 }
 
                 return _qz.websocket.dataPromise('hid.sendData', deviceInfo);
@@ -1725,6 +2030,44 @@ var qz = (function() {
                 }
 
                 return _qz.websocket.dataPromise('hid.readData', deviceInfo);
+            },
+
+            /**
+             * Send a feature report to a claimed HID device.
+             *
+             * @param {object} deviceInfo Config details of the HID device.
+             *  @param deviceInfo.vendorId Hex string of HID device's vendor ID.
+             *  @param deviceInfo.productId Hex string of HID device's product ID.
+             *  @param deviceInfo.usagePage Hex string of HID device's usage page when multiple are present.
+             *  @param deviceInfo.serial Serial ID of HID device.
+             *  @param deviceInfo.data Bytes to send over specified endpoint.
+             *  @param deviceInfo.endpoint=0x00 First byte of the data packet signifying the HID report ID.
+             *                             Must be 0x00 for devices only supporting a single report.
+             *  @param deviceInfo.reportId=0x00 Alias for <code>deviceInfo.endpoint</code>. Not used if endpoint is provided.
+             *  @param {string} [deviceInfo.type='PLAIN'] Valid values <code>[FILE | PLAIN | HEX | BASE64]</code>
+             * @returns {Promise<null|Error>}
+             *
+             * @memberof qz.hid
+             */
+            sendFeatureReport: function(deviceInfo) {
+                return _qz.websocket.dataPromise('hid.sendFeatureReport', deviceInfo);
+            },
+
+            /**
+             * Get a feature report from a claimed HID device.
+             *
+             * @param {object} deviceInfo Config details of the HID device.
+             *  @param deviceInfo.vendorId Hex string of HID device's vendor ID.
+             *  @param deviceInfo.productId Hex string of HID device's product ID.
+             *  @param deviceInfo.usagePage Hex string of HID device's usage page when multiple are present.
+             *  @param deviceInfo.serial Serial ID of HID device.
+             *  @param deviceInfo.responseSize Size of the byte array to receive a response in.
+             * @returns {Promise<Array<string>|Error>} List of (hexadecimal) bytes received from the HID device.
+             *
+             * @memberof qz.hid
+             */
+            getFeatureReport: function(deviceInfo) {
+                return _qz.websocket.dataPromise('hid.getFeatureReport', deviceInfo);
             },
 
             /**
@@ -1885,6 +2228,9 @@ var qz = (function() {
              *   @param {number} [params.listener.bytes=-1] Number of bytes to return or -1 for all
              *   @param {number} [params.listener.lines=-1] Number of lines to return or -1 for all
              *   @param {boolean} [params.listener.reverse] Controls whether data should be returned from the bottom of the file.  Default value is true for line mode and false for byte mode.
+             *   @param {string|Array<string>} [params.include] File patterns to match.  Blank values will be ignored.
+             *   @param {string|Array<string>} [params.exclude] File patterns to exclude.  Blank values will be ignored.  Takes priority over <code>params.include</code>.
+             *   @param {boolean} [params.ignoreCase=true] Whether <code>params.include</code> or <code>params.exclude</code> are case-sensitive.
              * @returns {Promise<null|Error>}
              * @since 2.1.0
              *
@@ -1893,6 +2239,12 @@ var qz = (function() {
              * @memberof qz.file
              */
             startListening: function(path, params) {
+                if (params && typeof params.include !== 'undefined' && !Array.isArray(params.include)) {
+                    params.include = [params.include];
+                }
+                if (params && typeof params.exclude !== 'undefined' && !Array.isArray(params.exclude)) {
+                    params.exclude = [params.exclude];
+                }
                 var param = _qz.tools.extend({ path: path }, params);
                 return _qz.websocket.dataPromise('file.startListening', param);
             },
@@ -1943,6 +2295,13 @@ var qz = (function() {
              * @since 2.1.0
              */
             device: function(hostname, port) {
+                // Wrap 2.0
+                if (_qz.tools.isVersion(2, 0)) {
+                    return _qz.compatible.networking(hostname, port, null, null, function(data) {
+                        return { ip: data.ipAddress, mac: data.macAddress };
+                    });
+                }
+                // Use 2.1
                 return _qz.websocket.dataPromise('networking.device', {
                     hostname: hostname,
                     port: port
@@ -1958,6 +2317,13 @@ var qz = (function() {
              * @since 2.1.0
              */
             devices: function(hostname, port) {
+                // Wrap 2.0
+                if (_qz.tools.isVersion(2, 0)) {
+                    return _qz.compatible.networking(hostname, port, null, null, function(data) {
+                        return [{ ip: data.ipAddress, mac: data.macAddress }];
+                    });
+                }
+                // Use 2.1
                 return _qz.websocket.dataPromise('networking.devices', {
                     hostname: hostname,
                     port: port
@@ -1974,24 +2340,67 @@ var qz = (function() {
             /**
              * Set promise resolver for calls to acquire the site's certificate.
              *
-             * @param {Function} promiseCall <code>Function({function} resolve)</code> called as promise for getting the public certificate.
-             *     Should call <code>resolve</code> parameter with the result.
+             * @param {Function|Promise<string>} promiseHandler Either a function that will be used as a promise resolver (of format <code>Function({function} resolve, {function}reject)</code>),
+             *     or the entire promise, either of which should return the public certificate via their respective <code>resolve</code> call.
              *
              * @memberof qz.security
              */
-            setCertificatePromise: function(promiseCall) {
-                _qz.security.certPromise = promiseCall;
+            setCertificatePromise: function(promiseHandler) {
+                _qz.security.certHandler = promiseHandler;
             },
 
             /**
-             * Set promise creator for calls to sign API calls.
+             * Set promise factory for calls to sign API calls.
              *
-             * @param {Function} promiseGen <code>Function({function} toSign)</code> Should return a function, <code>Function({function} resolve)</code>, that
-             *     will sign the content and resolve the created promise.
+             * @param {Function|Promise<string>} promiseFactory Either a function that accepts a string parameter of the data to be signed
+             *     and returns a function to be used as a promise resolver (of format <code>Function({function} resolve, {function}reject)</code>),
+             *     or a promise that can take a string parameter of the data to be signed, either of which should return the signed contents of
+             *     the passed string parameter via their respective <code>resolve</code> call.
+             *
+             * @example
+             *  qz.security.setSignaturePromise(function(dataToSign) {
+             *    return function(resolve, reject) {
+             *      $.ajax("/signing-url?data=" + dataToSign).then(resolve, reject);
+             *    }
+             *  })
+             *
              * @memberof qz.security
              */
-            setSignaturePromise: function(promiseGen) {
-                _qz.security.signaturePromise = promiseGen;
+            setSignaturePromise: function(promiseFactory) {
+                _qz.security.signatureFactory = promiseFactory;
+            },
+
+            /**
+             * Set which signing algorithm QZ will check signatures against.
+             *
+             * @param {string} algorithm The algorithm used in signing. Valid values: <code>[SHA1 | SHA256 | SHA512]</code>
+             * @since 2.1.0
+             *
+             * @memberof qz.security
+             */
+            setSignatureAlgorithm: function(algorithm) {
+                //warn for incompatibilities if known
+                if (!_qz.compatible.algorithm()) {
+                    return;
+                }
+
+                if (["SHA1", "SHA256", "SHA512"].indexOf(algorithm.toUpperCase()) < 0) {
+                    _qz.log.error("Signing algorithm '" + algorithm + "' is not supported.");
+                } else {
+                    _qz.security.signAlgorithm = algorithm;
+                }
+            },
+
+            /**
+             * Get the signing algorithm QZ will be checking signatures against.
+             *
+             * @returns {string} The algorithm used in signing.
+             * @since 2.1.0
+             *
+             * @memberof qz.security
+             */
+            getSignatureAlgorithm: function() {
+                return _qz.security.signAlgorithm;
             }
         },
 
@@ -2020,6 +2429,25 @@ var qz = (function() {
              */
             getVersion: function() {
                 return _qz.websocket.dataPromise('getVersion');
+            },
+
+            /**
+             * Checks for the specified version of connected QZ Tray application.
+             *
+             * @param {string|number} [major] Major version to check
+             * @param {string|number} [minor] Minor version to check
+             * @param {string|number} [patch] Patch version to check
+             *
+             * @memberof qz.api
+             */
+            isVersion: _qz.tools.isVersion,
+
+            isVersionGreater: function(major, minor, patch, build) {
+                return _qz.tools.versionCompare(major, minor, patch, build) > 0;
+            },
+
+            isVersionLess: function(major, minor, patch, build) {
+                return _qz.tools.versionCompare(major, minor, patch, build) < 0;
             },
 
             /**
@@ -2069,6 +2497,7 @@ var qz = (function() {
         version: _qz.VERSION
     };
 
+    return qz;
 })();
 
 

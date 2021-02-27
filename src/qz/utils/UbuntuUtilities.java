@@ -12,9 +12,17 @@ package qz.utils;
 
 import com.github.zafarkhaja.semver.Version;
 import qz.common.Constants;
-import qz.ui.IconCache;
+import qz.ui.component.IconCache;
 
 import java.awt.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Utility class for Ubuntu OS specific functions.
@@ -76,14 +84,17 @@ public class UbuntuUtilities {
      * @return the current running theme, or an empty String if it could not be determined.
      */
     public static String getThemeName(String defaultTheme) {
-        String themeName = ShellUtilities.execute(
-                new String[] {
-                        "gconftool-2",
-                        "--get",
-                        "/desktop/gnome/shell/windows/theme"
-                },
-                null
-        );
+        String themeName = "";
+        if(ShellUtilities.execute("which", "gconftool-2")) {
+            themeName = ShellUtilities.execute(
+                    new String[] {
+                            "gconftool-2",
+                            "--get",
+                            "/desktop/gnome/shell/windows/theme"
+                    },
+                    null
+            );
+        }
 
         return themeName.isEmpty()? defaultTheme:themeName;
     }
@@ -110,7 +121,7 @@ public class UbuntuUtilities {
      * @return true if enabled, false if not
      */
     public static boolean isDarkMode() {
-        return !ShellUtilities.execute(new String[] { "gsettings", "get", "org.gnome.desktop.interface", "gtk-theme" }, new String[] { "dark" }).isEmpty();
+        return !ShellUtilities.execute(new String[] { "gsettings", "get", "org.gnome.desktop.interface", "gtk-theme" }, new String[] { "dark" }, true, true).isEmpty();
     }
 
     public static double getScaleFactor() {
@@ -119,5 +130,4 @@ public class UbuntuUtilities {
         }
         return GtkUtilities.getScaleFactor();
     }
-
 }

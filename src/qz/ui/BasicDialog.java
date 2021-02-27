@@ -1,6 +1,7 @@
 package qz.ui;
 
 import qz.common.Constants;
+import qz.ui.component.IconCache;
 import qz.utils.MacUtilities;
 import qz.utils.ShellUtilities;
 import qz.utils.SystemUtilities;
@@ -16,7 +17,7 @@ import java.awt.image.BufferedImage;
 /**
  * Created by Tres on 2/23/2015.
  */
-public class BasicDialog extends JDialog {
+public class BasicDialog extends JDialog implements Themeable {
     private JPanel mainPanel;
     private JComponent headerComponent;
     private JComponent contentComponent;
@@ -41,7 +42,7 @@ public class BasicDialog extends JDialog {
     }
 
     public void initBasicComponents() {
-        setIconImage(iconCache.getImage(IconCache.Icon.DEFAULT_ICON));
+        setIconImages(iconCache.getImages(IconCache.Icon.TASK_BAR_ICON));
         mainPanel = new JPanel();
         mainPanel.setBorder(new EmptyBorder(Constants.BORDER_PADDING, Constants.BORDER_PADDING, Constants.BORDER_PADDING, Constants.BORDER_PADDING));
 
@@ -74,6 +75,11 @@ public class BasicDialog extends JDialog {
         pack();
 
         setLocationRelativeTo(null);    // center on main display
+    }
+
+    @Override
+    public void refresh() {
+        ThemeUtilities.refreshAll(this);
     }
 
     public JLabel setHeader(String header) {

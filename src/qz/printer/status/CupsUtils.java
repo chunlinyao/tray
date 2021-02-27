@@ -1,16 +1,13 @@
 package qz.printer.status;
 
 import com.sun.jna.Pointer;
-import org.codehaus.jettison.json.JSONArray;
 import org.eclipse.jetty.util.URIUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.printer.status.Cups.IPP;
-import qz.utils.ShellUtilities;
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.HashMap;
 
 /**
  * Created by kyle on 5/17/17.
@@ -70,22 +67,6 @@ public class CupsUtils {
         cups.ippDelete(response);
 
         return statuses.toArray(new PrinterStatus[statuses.size()]);
-    }
-
-    public static void convertPrinterNames(JSONArray printerNames) {
-        try {
-            HashMap<String, String> lookup = ShellUtilities.getCupsPrinters();
-
-            for(int i = 0; i < printerNames.length(); i++) {
-                String oldPrinterName = printerNames.getString(i);
-                if (lookup.containsKey(oldPrinterName)) {
-                    printerNames.put(i, lookup.get(oldPrinterName));
-                }
-            }
-        }
-        catch(Exception e) {
-            log.warn("Invalid JSON");
-        }
     }
 
     public static ArrayList<PrinterStatus> getAllStatuses() {

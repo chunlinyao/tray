@@ -12,6 +12,7 @@ import java.awt.event.*;
 import java.lang.reflect.Field;
 
 public class TaskbarTrayIcon extends JFrame implements WindowListener {
+
     private Dimension iconSize;
     private JPopupMenu popup;
 
@@ -24,7 +25,7 @@ public class TaskbarTrayIcon extends JFrame implements WindowListener {
         // must come first
         setUndecorated(true);
         setTaskBarTitle(getTitle());
-        setSize(0,0);
+        setSize(0, 0);
         getContentPane().setBackground(Color.BLACK);
         if (SystemUtilities.isUbuntu()) {
             // attempt to camouflage the single pixel left behind
@@ -43,16 +44,17 @@ public class TaskbarTrayIcon extends JFrame implements WindowListener {
         addWindowListener(this);
     }
 
-    // fixes Linux taskbar title per http://hg.netbeans.org/core-main/rev/5832261b8434
+    // fixes Linux taskbar title per http://hg.netbeans.org/core-main/rev/5832261b8434, JDK-6528430
     public static void setTaskBarTitle(String title) {
         try {
             Class<?> toolkit = Toolkit.getDefaultToolkit().getClass();
-            if (toolkit.getName().equals("sun.awt.X11.XToolkit")) {
+            if ("sun.awt.X11.XToolkit".equals(toolkit.getName())) {
                 final Field awtAppClassName = toolkit.getDeclaredField("awtAppClassName");
                 awtAppClassName.setAccessible(true);
                 awtAppClassName.set(null, title);
             }
-        } catch(Exception ignore) {}
+        }
+        catch(Exception ignore) {}
     }
 
     /**
@@ -95,19 +97,36 @@ public class TaskbarTrayIcon extends JFrame implements WindowListener {
         });
     }
 
-    public void displayMessage(String caption, String text, TrayIcon.MessageType level) { /* noop */ }
+    public void displayMessage(String caption, String text, TrayIcon.MessageType level) {
+        int messageType;
+        switch(level) {
+            case WARNING:
+                messageType = JOptionPane.WARNING_MESSAGE;
+                break;
+            case ERROR:
+                messageType = JOptionPane.ERROR_MESSAGE;
+                break;
+            case INFO:
+                messageType = JOptionPane.INFORMATION_MESSAGE;
+                break;
+            case NONE:
+            default:
+                messageType = JOptionPane.PLAIN_MESSAGE;
+        }
+        JOptionPane.showMessageDialog(null, text, caption, messageType);
+    }
 
     @Override
     public void windowDeiconified(WindowEvent e) {
         Point p = MouseInfo.getPointerInfo().getLocation();
         setLocation(p);
         // call show against parent to prevent un-clickable state
-        popup.show(this, 0,0);
+        popup.show(this, 0, 0);
 
         // move to mouse cursor; adjusting for screen boundaries
         Point before = popup.getLocationOnScreen();
         Point after = new Point();
-        after.setLocation(before.x < p.x ? p.x - popup.getWidth() : p.x, before.y < p.y ? p.y - popup.getHeight() : p.y);
+        after.setLocation(before.x < p.x? p.x - popup.getWidth():p.x, before.y < p.y? p.y - popup.getHeight():p.y);
         popup.setLocation(after);
     }
 
@@ -128,7 +147,10 @@ public class TaskbarTrayIcon extends JFrame implements WindowListener {
 
     @Override
     public void windowDeactivated(WindowEvent windowEvent) {
-        popup.setVisible(false);
-        setState(JFrame.ICONIFIED);
+        if (popup != null) {
+            popup.setVisible(false);
+            setState(JFrame.ICONIFIED);
+        }
     }
+
 }
