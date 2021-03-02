@@ -8,6 +8,7 @@ import qz.communication.*;
 import qz.printer.status.StatusSession;
 import qz.printer.status.StatusMonitor;
 import qz.utils.FileWatcher;
+import qz.utils.ImeUtilities;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -31,6 +32,7 @@ public class SocketConnection {
 
     // DeviceOptions -> open DeviceIO
     private final HashMap<DeviceOptions,DeviceIO> openDevices = new HashMap<>();
+    private ImeState savedImeState;
 
 
     public SocketConnection(Certificate cert) {
@@ -151,4 +153,39 @@ public class SocketConnection {
         stopStatusListener();
     }
 
+    static class ImeState {
+        boolean capsLock;
+        boolean active;
+    }
+    public synchronized void restoreImeState() {
+        if (savedImeState != null) {
+            ImeUtilities.setCapsLock(savedImeState.capsLock);
+            ImeUtilities.setImeOpen(savedImeState.active);
+            savedImeState = null;
+        }
+    }
+
+    public void capsUnlock() {
+        ImeUtilities.setCapsLock(false);
+    }
+
+    public void imeInactive() {
+        ImeUtilities.setImeOpen(false);
+    }
+
+    public void imeActive() {
+        ImeUtilities.setImeOpen(true);
+    }
+
+    public synchronized void saveImeState() {
+        if (savedImeState == null) {
+            savedImeState = new ImeState();
+            savedImeState.capsLock = ImeUtilities.getCapsLock();
+            savedImeState.active = ImeUtilities.getImeOpen();
+        }
+    }
+
+    public void capsLock() {
+        ImeUtilities.setCapsLock(true);
+    }
 }

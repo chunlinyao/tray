@@ -273,7 +273,7 @@ public class TrayManager {
         desktopItem.setMnemonic(KeyEvent.VK_D);
         desktopItem.addActionListener(desktopListener());
 
-        anonymousItem = new JCheckBoxMenuItem("组织匿名访问");
+        anonymousItem = new JCheckBoxMenuItem("阻止匿名访问");
         anonymousItem.setToolTipText("Blocks all requests that do not contain a valid certificate/signature");
         anonymousItem.setMnemonic(KeyEvent.VK_K);
         anonymousItem.setState(Certificate.UNKNOWN.isBlocked());

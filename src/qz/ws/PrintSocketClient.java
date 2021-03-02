@@ -96,6 +96,9 @@ public class PrintSocketClient {
         NETWORKING_DEVICE_LEGACY("websocket.getNetworkInfo", true),
         GET_VERSION("getVersion", false),
 
+        IME_CONTROL("ime.control", false),
+        IME_RESTORE("ime.restore", false),
+
         INVALID("", false);
 
 
@@ -644,7 +647,32 @@ public class PrintSocketClient {
             case GET_VERSION:
                 sendResult(session, UID, Constants.VERSION);
                 break;
-
+            case IME_CONTROL:
+                if (SystemUtilities.isWindows()) {
+                    String ime = params.optString("ime", null);
+                    connection.saveImeState();
+                    if (ime != null) {
+                       if (ime.equals("active")) {
+                           connection.imeActive();
+                       } else {
+                           connection.imeInactive();
+                       }
+                    }
+                    String caps = params.optString("caps", null);
+                    if (caps.equals("lock")) {
+                        connection.capsLock();
+                    } else {
+                        connection.capsUnlock();
+                    }
+                }
+                sendResult(session, UID, null);
+                break;
+            case IME_RESTORE:
+                if (SystemUtilities.isWindows()) {
+                    connection.restoreImeState();
+                }
+                sendResult(session, UID, null);
+                break;
             case INVALID:
             default:
                 sendError(session, UID, "Invalid function call: " + json.optString("call", "NONE"));

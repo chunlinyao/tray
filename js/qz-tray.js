@@ -2281,6 +2281,30 @@ var qz = (function() {
         },
 
         /**
+         * Calls related to IME
+         * @namespace qz.ime
+         * @since 2.1.0
+         */
+        ime: {
+            control: function(active, capsLock) {
+                  var param = {};
+                  if (active === true) {
+                     param.ime = "active";
+                  } else if (active === false) {
+                     param.ime = "inactive";
+                  }
+                  if (capsLock === true) {
+                     param.caps = "lock";
+                  } else if (capsLock === false) {
+                     param.caps = "unlock";
+                  }
+                  return _qz.websocket.dataPromise('ime.control', param);
+            },
+            restore: function() {
+                  return _qz.websocket.dataPromise('ime.restore');
+            }
+        },
+        /**
          * Calls related to networking information
          * @namespace qz.networking
          * @since 2.1.0
