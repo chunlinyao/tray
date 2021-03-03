@@ -5,10 +5,13 @@ package qz.utils;
 
 import com.sun.jna.Library;
 import com.sun.jna.Native;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static java.lang.Thread.sleep;
 
 public class ImeUtilities {
+    private static final Logger log = LoggerFactory.getLogger(ImeUtilities.class);
     public static int IMC_GETOPENSTATUS = 0x0005;
     public static int IMC_SETOPENSTATUS = 0x0006;
     public static int WM_IME_CONTROL = 0x0283;
@@ -45,6 +48,7 @@ public class ImeUtilities {
         int hWnd = user32.GetForegroundWindow();
         int hIME = imm.ImmGetDefaultIMEWnd(hWnd);
         int result = user32.SendMessageW(hIME, WM_IME_CONTROL, IMC_SETOPENSTATUS, isOpen ? 1 : 0);
+        log.info("set ime for hwnd=" + hWnd + ", hIME=" + hIME + ", result=" + result + ", isOpen=" + isOpen);
         return result == 0;
     }
     public static void main(String[] args) throws InterruptedException {
